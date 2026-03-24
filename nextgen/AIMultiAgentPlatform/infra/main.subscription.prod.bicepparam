@@ -12,7 +12,7 @@ param tags = {
 }
 param sqlAdminLogin = 'aimapsqladmin'
 param sqlAdminPassword = '<replace-with-secure-value>'
-param appServicePlanSku = {
+param productionAppServicePlanSku = {
   name: 'P1v3'
   tier: 'PremiumV3'
   size: 'P1v3'

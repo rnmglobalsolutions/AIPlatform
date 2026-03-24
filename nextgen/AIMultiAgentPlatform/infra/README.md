@@ -32,6 +32,7 @@ The `lean` mode uses:
 
 - a single Azure Functions Flex Consumption app
 - a Functions-based HTTP entrypoint instead of the ASP.NET Core Web App
+- no dedicated App Service plan override in the `dev` parameter file because lean no longer uses that resource
 
 ## Structure
 

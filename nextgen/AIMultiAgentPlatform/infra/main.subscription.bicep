@@ -33,8 +33,8 @@ param sqlAdminLogin string = ''
 @description('SQL admin login password. Required for production mode.')
 param sqlAdminPassword string = ''
 
-@description('App Service plan SKU for API and workers.')
-param appServicePlanSku object = {
+@description('Dedicated App Service plan SKU used only in production mode for the ASP.NET Core API.')
+param productionAppServicePlanSku object = {
   name: 'B1'
   tier: 'Basic'
   size: 'B1'
@@ -103,7 +103,7 @@ module environmentModule './modules/environment.bicep' = {
     })
     sqlAdminLogin: sqlAdminLogin
     sqlAdminPassword: sqlAdminPassword
-    appServicePlanSku: appServicePlanSku
+    appServicePlanSku: productionAppServicePlanSku
     serviceBusSku: serviceBusSku
     sqlDatabaseSkuName: sqlDatabaseSkuName
     sqlDatabaseMaxSizeBytes: sqlDatabaseMaxSizeBytes

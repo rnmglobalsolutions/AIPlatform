@@ -10,12 +10,6 @@ param tags = {
   workload: 'AI-Multi-Agent-Platform'
   environment: 'dev'
 }
-param appServicePlanSku = {
-  name: 'B1'
-  tier: 'Basic'
-  size: 'B1'
-  capacity: 1
-}
 param serviceBusSku = 'Standard'
 param sqlDatabaseSkuName = 'Basic'
 param sqlDatabaseMaxSizeBytes = 2147483648
