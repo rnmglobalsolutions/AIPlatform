@@ -49,3 +49,20 @@ jobs:
             --location eastus \
             --template-file nextgen/AIMultiAgentPlatform/infra/main.subscription.bicep \
             --parameters nextgen/AIMultiAgentPlatform/infra/main.subscription.dev.bicepparam
+
+      - name: Show Subscription Deployment Operations
+        if: failure()
+        continue-on-error: true
+        run: |
+          az deployment operation sub list \
+            --name aimap-dev-infra \
+            --output table
+
+      - name: Show Environment Deployment Operations
+        if: failure()
+        continue-on-error: true
+        run: |
+          az deployment operation group list \
+            --resource-group rg-aimap-dev \
+            --name environment-aimap-dev \
+            --output table

@@ -20,7 +20,9 @@ param tags object = {}
 
 var isLean = toLower(platformMode) == 'lean'
 var deploymentStorageContainerName = 'function-releases'
-var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};EndpointSuffix=${environment().suffixes.storage};AccountKey=${listKeys(storageAccount.id, '2023-05-01').keys[0].value}'
+var storageBlobEndpoint = storageAccount.properties.primaryEndpoints.blob
+var deploymentStorageContainerUrl = '${storageBlobEndpoint}${deploymentStorageContainerName}'
+var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};EndpointSuffix=${environment().suffixes.storage};AccountKey=${storageAccount.listKeys().keys[0].value}'
 
 resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
   scope: resourceGroup()
@@ -68,6 +70,9 @@ resource workerFlexConsumptionPlan 'Microsoft.Web/serverfarms@2023-12-01' = if (
   sku: {
     name: 'FC1'
     tier: 'FlexConsumption'
+    size: 'FC1'
+    family: 'FC'
+    capacity: 0
   }
   properties: {
     reserved: true
@@ -130,7 +135,7 @@ resource apiWebApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
         }
         {
           name: 'Storage__BlobServiceUri'
-          value: 'https://${storageAccountName}.blob.core.windows.net/'
+          value: storageBlobEndpoint
         }
         {
           name: 'Sql__ConnectionString'
@@ -184,7 +189,7 @@ resource leanFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (isLean) {
       deployment: {
         storage: {
           type: 'blobContainer'
-          value: 'https://${storageAccountName}.blob.core.windows.net/${deploymentStorageContainerName}'
+          value: deploymentStorageContainerUrl
           authentication: {
             type: 'StorageAccountConnectionString'
             storageAccountConnectionStringName: 'DEPLOYMENT_STORAGE_CONNECTION_STRING'
@@ -193,7 +198,7 @@ resource leanFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (isLean) {
       }
       runtime: {
         name: 'dotnet-isolated'
-        version: '10.0'
+        version: '10'
       }
       scaleAndConcurrency: {
         instanceMemoryMB: 2048
@@ -261,7 +266,7 @@ resource leanFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (isLean) {
         }
         {
           name: 'Storage__BlobServiceUri'
-          value: 'https://${storageAccountName}.blob.core.windows.net/'
+          value: storageBlobEndpoint
         }
         {
           name: 'Sql__ConnectionString'
@@ -351,7 +356,7 @@ resource productionFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
         }
         {
           name: 'Storage__BlobServiceUri'
-          value: 'https://${storageAccountName}.blob.core.windows.net/'
+          value: storageBlobEndpoint
         }
         {
           name: 'Sql__ConnectionString'
