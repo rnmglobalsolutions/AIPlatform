@@ -28,6 +28,12 @@ var serviceBusNamespaceName = take(replace('sb-${appName}-${environmentName}-${c
 var appServicePlanName = 'asp-${appName}-${environmentName}'
 var apiAppName = take(replace('app-${appName}-api-${environmentName}-${compactSuffix}', '-', ''), 60)
 var workerFunctionAppName = take(replace('func-${appName}-wrk-${environmentName}-${compactSuffix}', '-', ''), 60)
+var sqlConnectionStringPlaceholder = isProduction
+  ? 'Server=tcp:${sqlServerName}.database.windows.net,1433;Initial Catalog=${sqlDatabaseName};Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+  : ''
+var serviceBusFullyQualifiedNamespace = isProduction
+  ? '${serviceBusNamespaceName}.servicebus.windows.net'
+  : ''
 
 module monitoringModule './monitoring.bicep' = {
   name: 'monitoring-${environmentName}'
@@ -67,9 +73,6 @@ module keyVaultModule './key-vault.bicep' = {
     managedIdentityPrincipalId: identityModule.outputs.principalId
     tags: tags
   }
-  dependsOn: [
-    identityModule
-  ]
 }
 
 module sqlModule './sql.bicep' = if (isProduction) {
@@ -116,16 +119,10 @@ module computeModule './compute.bicep' = {
     targetPersistenceMode: isProduction ? 'Sql' : 'Table'
     targetMessagingMode: isProduction ? 'ServiceBus' : 'Queue'
     targetHostingMode: isProduction ? 'Dedicated' : 'FunctionsConsumption'
-    sqlConnectionStringPlaceholder: isProduction ? 'Server=tcp:${sqlModule.outputs.sqlServerFqdn},1433;Initial Catalog=${sqlModule.outputs.sqlDatabaseName};Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;' : ''
-    serviceBusFullyQualifiedNamespace: isProduction ? serviceBusModule.outputs.fullyQualifiedNamespace : ''
+    sqlConnectionStringPlaceholder: sqlConnectionStringPlaceholder
+    serviceBusFullyQualifiedNamespace: serviceBusFullyQualifiedNamespace
     tags: tags
   }
-  dependsOn: [
-    monitoringModule
-    storageModule
-    identityModule
-    keyVaultModule
-  ]
 }
 
 output apiAppName string = isProduction ? apiAppName : ''
