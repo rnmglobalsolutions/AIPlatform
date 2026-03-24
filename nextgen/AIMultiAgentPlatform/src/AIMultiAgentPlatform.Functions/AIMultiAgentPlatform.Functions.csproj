@@ -3,10 +3,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <AzureFunctionsVersion>v4</AzureFunctionsVersion>
     <OutputType>Exe</OutputType>
-    <UserSecretsId>dotnet-AIMultiAgentPlatform.Workers-9bf27a30-231c-4b6e-bb22-27d0331d437e</UserSecretsId>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" OutputItemType="Analyzer" />
@@ -14,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AIMultiAgentPlatform.Application\AIMultiAgentPlatform.Application.csproj" />
+    <ProjectReference Include="..\AIMultiAgentPlatform.Contracts\AIMultiAgentPlatform.Contracts.csproj" />
     <ProjectReference Include="..\AIMultiAgentPlatform.Infrastructure\AIMultiAgentPlatform.Infrastructure.csproj" />
   </ItemGroup>
 

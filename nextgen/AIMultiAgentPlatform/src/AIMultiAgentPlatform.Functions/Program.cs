@@ -4,6 +4,7 @@ using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.Hosting;
 
 var builder = FunctionsApplication.CreateBuilder(args);
+
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(
     builder.Configuration["PlatformMode"],

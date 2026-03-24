@@ -112,7 +112,7 @@ module computeModule './compute.bicep' = {
     platformMode: isProduction ? 'Production' : 'Lean'
     persistenceMode: 'InMemory'
     messagingMode: isProduction ? 'ServiceBus' : 'Queue'
-    hostingMode: isProduction ? 'Dedicated' : 'CurrentRuntime'
+    hostingMode: isProduction ? 'Dedicated' : 'FunctionsConsumption'
     targetPersistenceMode: isProduction ? 'Sql' : 'Table'
     targetMessagingMode: isProduction ? 'ServiceBus' : 'Queue'
     targetHostingMode: isProduction ? 'Dedicated' : 'FunctionsConsumption'
@@ -128,7 +128,7 @@ module computeModule './compute.bicep' = {
   ]
 }
 
-output apiAppName string = apiAppName
+output apiAppName string = isProduction ? apiAppName : ''
 output workerFunctionAppName string = workerFunctionAppName
 output keyVaultName string = keyVaultName
 output storageAccountName string = storageAccountName

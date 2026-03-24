@@ -17,7 +17,8 @@ Lean mode is the low-cost starting point for development and early validation.
 
 Target direction:
 
-- Azure Functions Consumption
+- Azure Functions Flex Consumption
+- HTTP entrypoint hosted directly in Functions for lean mode
 - Blob Storage
 - Table Storage
 - Queue Storage
@@ -27,6 +28,8 @@ Target direction:
 Current implementation status:
 
 - infrastructure can be deployed in a reduced footprint
+- lean deploys a single Function App on Azure Functions Flex Consumption
+- lean uses a dedicated Functions HTTP entrypoint project instead of the ASP.NET Core API
 - application wiring records the environment as `Lean`
 - persistence still uses in-memory adapters today
 - messaging still uses in-memory/runtime placeholders today

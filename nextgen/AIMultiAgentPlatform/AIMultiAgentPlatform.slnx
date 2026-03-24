@@ -4,6 +4,7 @@
     <Project Path="src/AIMultiAgentPlatform.Application/AIMultiAgentPlatform.Application.csproj" />
     <Project Path="src/AIMultiAgentPlatform.Contracts/AIMultiAgentPlatform.Contracts.csproj" />
     <Project Path="src/AIMultiAgentPlatform.Domain/AIMultiAgentPlatform.Domain.csproj" />
+    <Project Path="src/AIMultiAgentPlatform.Functions/AIMultiAgentPlatform.Functions.csproj" />
     <Project Path="src/AIMultiAgentPlatform.Infrastructure/AIMultiAgentPlatform.Infrastructure.csproj" />
     <Project Path="src/AIMultiAgentPlatform.Mobile/AIMultiAgentPlatform.Mobile.csproj" />
     <Project Path="src/AIMultiAgentPlatform.Portal/AIMultiAgentPlatform.Portal.csproj" />

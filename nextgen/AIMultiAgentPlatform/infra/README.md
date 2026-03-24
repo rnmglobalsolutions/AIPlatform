@@ -17,16 +17,21 @@ The deployment always creates:
 - storage account
 - user-assigned managed identity
 - Key Vault
-- low-cost or dedicated compute, depending on mode
-- Web App for the HTTP API
 - Function App for workers/background processing
 
 The `production` mode additionally creates:
 
+- dedicated API App Service plan
+- Web App for the HTTP API
 - Azure SQL logical server
 - Azure SQL database
 - Azure Service Bus namespace
 - Service Bus queues
+
+The `lean` mode uses:
+
+- a single Azure Functions Flex Consumption app
+- a Functions-based HTTP entrypoint instead of the ASP.NET Core Web App
 
 ## Structure
 
@@ -53,7 +58,7 @@ The `production` mode additionally creates:
 - `modules/service-bus.bicep`
   Service Bus namespace and queues.
 - `modules/compute.bicep`
-  App Service plan, Web App, and Function App.
+  Production App Service compute plus the lean/prod Function App topology.
 
 ## Deploy
 
@@ -120,8 +125,9 @@ Recommended git flow:
 ## Notes
 
 - This infrastructure assumes the application code is deployed separately through GitHub Actions or another CI/CD pipeline.
-- The current codebase still runs as ASP.NET Core API + worker host, so `lean` mode minimizes cost through resource omission and low-cost SKUs while preserving the current delivery shape.
-- The app settings now distinguish current runtime modes from target infrastructure intent so the platform can evolve toward Table/Queue/Functions Consumption later without rewriting the business layer.
+- `lean` now uses a Functions-based HTTP entrypoint so the low-cost environment can run as a single serverless Function App.
+- In `lean`, GitHub deploys the Functions entrypoint project to the single Function App. In `production`, GitHub deploys the ASP.NET Core API to the Web App and the worker host to the Function App.
+- The app settings now distinguish current runtime modes from target infrastructure intent so the platform can evolve toward Table/Queue/Functions Flex Consumption later without rewriting the business layer.
 - See [infrastructure-modes.md](../docs/architecture/infrastructure-modes.md) for the runtime-vs-target model.
 - App settings include placeholders for external providers such as OpenAI, ManyChat, Calendly, HeyGen, and ElevenLabs. Store the actual secrets in Key Vault.
 - The first production hardening step after this baseline should be to add:
