@@ -8,7 +8,19 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   location: location
   tags: tags
   properties: {
-    enableRbacAuthorization: true
+    accessPolicies: [
+      {
+        objectId: managedIdentityPrincipalId
+        tenantId: subscription().tenantId
+        permissions: {
+          secrets: [
+            'get'
+            'list'
+          ]
+        }
+      }
+    ]
+    enableRbacAuthorization: false
     enableSoftDelete: true
     enabledForDeployment: false
     enabledForDiskEncryption: false
@@ -19,16 +31,6 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
       name: 'standard'
     }
     tenantId: subscription().tenantId
-  }
-}
-
-resource keyVaultSecretsOfficerRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, managedIdentityPrincipalId, 'Key Vault Secrets User')
-  scope: keyVault
-  properties: {
-    principalId: managedIdentityPrincipalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
   }
 }
 

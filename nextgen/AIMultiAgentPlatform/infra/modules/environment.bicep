@@ -29,7 +29,7 @@ var appServicePlanName = 'asp-${appName}-${environmentName}'
 var apiAppName = take(replace('app-${appName}-api-${environmentName}-${compactSuffix}', '-', ''), 60)
 var workerFunctionAppName = take(replace('func-${appName}-wrk-${environmentName}-${compactSuffix}', '-', ''), 60)
 var sqlConnectionStringPlaceholder = isProduction
-  ? 'Server=tcp:${sqlServerName}.database.windows.net,1433;Initial Catalog=${sqlDatabaseName};Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+  ? 'Server=tcp:${sqlServerName}${environment().suffixes.sqlServerHostname},1433;Initial Catalog=${sqlDatabaseName};Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
   : ''
 var serviceBusFullyQualifiedNamespace = isProduction
   ? '${serviceBusNamespaceName}.servicebus.windows.net'
