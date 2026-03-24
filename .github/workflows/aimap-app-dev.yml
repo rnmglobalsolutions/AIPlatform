@@ -1,0 +1,75 @@
+name: AIMAP App Dev
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'global.json'
+      - 'nextgen/AIMultiAgentPlatform/src/**'
+      - 'nextgen/AIMultiAgentPlatform/tests/**'
+      - 'nextgen/AIMultiAgentPlatform/AIMultiAgentPlatform.slnx'
+      - 'nextgen/AIMultiAgentPlatform/Directory.Packages.props'
+      - '.github/workflows/aimap-app-dev.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: aimap-app-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build Test and Deploy Dev App
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve Dev Function App Name
+        id: app-name
+        shell: bash
+        run: |
+          WORKER_APP_NAME="$(az deployment sub show --name aimap-dev-infra --query "properties.outputs.workerFunctionAppName.value" -o tsv)"
+
+          if [[ -z "$WORKER_APP_NAME" ]]; then
+            echo "Missing infrastructure outputs. Deploy dev infrastructure first."
+            exit 1
+          fi
+
+          echo "worker_app_name=$WORKER_APP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore nextgen/AIMultiAgentPlatform/AIMultiAgentPlatform.slnx
+
+      - name: Build
+        run: dotnet build nextgen/AIMultiAgentPlatform/AIMultiAgentPlatform.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test nextgen/AIMultiAgentPlatform/AIMultiAgentPlatform.slnx --configuration Release --no-build
+
+      - name: Publish Lean Functions
+        run: dotnet publish nextgen/AIMultiAgentPlatform/src/AIMultiAgentPlatform.Functions/AIMultiAgentPlatform.Functions.csproj --configuration Release --no-build --output artifacts/functions
+
+      - name: Deploy Lean Function App
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ steps.app-name.outputs.worker_app_name }}
+          package: artifacts/functions
