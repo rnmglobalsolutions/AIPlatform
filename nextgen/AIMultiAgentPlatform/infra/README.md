@@ -77,6 +77,7 @@ az deployment sub create \
 
 Repository workflows live at the repo root:
 
+- `.github/workflows/aimap-pr-validation.yml`
 - `.github/workflows/aimap-infra-dev.yml`
 - `.github/workflows/aimap-infra-prod.yml`
 - `.github/workflows/aimap-app-dev.yml`
@@ -107,6 +108,14 @@ The app deployment workflows expect infrastructure deployments to use these fixe
 - `aimap-prod-infra`
 
 That allows the app workflows to resolve the API and worker app names from Bicep outputs before deploying code.
+
+Recommended git flow:
+
+- work in `feature/*` branches
+- open a pull request into `main`
+- let `.github/workflows/aimap-pr-validation.yml` run build and test only
+- merge into `main` to trigger automatic `dev` deployment
+- use manual workflow dispatch plus environment approval for `prod`
 
 ## Notes
 

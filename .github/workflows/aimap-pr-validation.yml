@@ -1,0 +1,45 @@
+name: AIMAP PR Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'global.json'
+      - 'nextgen/AIMultiAgentPlatform/src/**'
+      - 'nextgen/AIMultiAgentPlatform/tests/**'
+      - 'nextgen/AIMultiAgentPlatform/infra/**'
+      - 'nextgen/AIMultiAgentPlatform/AIMultiAgentPlatform.slnx'
+      - 'nextgen/AIMultiAgentPlatform/Directory.Packages.props'
+      - '.github/workflows/aimap-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aimap-pr-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Build and Test Pull Request
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore nextgen/AIMultiAgentPlatform/AIMultiAgentPlatform.slnx
+
+      - name: Build
+        run: dotnet build nextgen/AIMultiAgentPlatform/AIMultiAgentPlatform.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test nextgen/AIMultiAgentPlatform/AIMultiAgentPlatform.slnx --configuration Release --no-build
