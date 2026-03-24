@@ -1,0 +1,49 @@
+name: AIMAP Infra Prod
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: aimap-infra-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Prod Infrastructure
+    runs-on: ubuntu-latest
+    environment: prod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: What-If Prod Infrastructure
+        run: |
+          az deployment sub what-if \
+            --name aimap-prod-infra \
+            --location eastus2 \
+            --template-file nextgen/AIMultiAgentPlatform/infra/main.subscription.bicep \
+            --parameters nextgen/AIMultiAgentPlatform/infra/main.subscription.prod.bicepparam \
+            --parameters sqlAdminLogin='${{ vars.AIMAP_SQL_ADMIN_LOGIN }}' \
+            --parameters sqlAdminPassword='${{ secrets.AIMAP_SQL_ADMIN_PASSWORD }}'
+
+      - name: Deploy Prod Infrastructure
+        run: |
+          az deployment sub create \
+            --name aimap-prod-infra \
+            --location eastus2 \
+            --template-file nextgen/AIMultiAgentPlatform/infra/main.subscription.bicep \
+            --parameters nextgen/AIMultiAgentPlatform/infra/main.subscription.prod.bicepparam \
+            --parameters sqlAdminLogin='${{ vars.AIMAP_SQL_ADMIN_LOGIN }}' \
+            --parameters sqlAdminPassword='${{ secrets.AIMAP_SQL_ADMIN_PASSWORD }}'
