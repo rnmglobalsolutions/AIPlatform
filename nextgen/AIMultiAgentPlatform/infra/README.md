@@ -131,6 +131,7 @@ Recommended git flow:
 - The app settings now distinguish current runtime modes from target infrastructure intent so the platform can evolve toward Table/Queue/Functions Flex Consumption later without rewriting the business layer.
 - See [infrastructure-modes.md](../docs/architecture/infrastructure-modes.md) for the runtime-vs-target model.
 - App settings include placeholders for external providers such as OpenAI, ManyChat, Calendly, HeyGen, and ElevenLabs. Store the actual secrets in Key Vault.
+- The compute layer now injects `TallyWebhook__SigningSecret` as a Key Vault reference. Create the secret in Key Vault with the exact name `tally-webhook-signing-secret`.
 - The first production hardening step after this baseline should be to add:
   - private endpoints / networking controls
   - SQL firewall tightening
