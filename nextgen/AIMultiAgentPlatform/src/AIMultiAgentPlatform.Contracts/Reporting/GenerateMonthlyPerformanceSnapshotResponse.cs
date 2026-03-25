@@ -3,6 +3,8 @@ namespace AIMultiAgentPlatform.Contracts.Reporting;
 public sealed record GenerateMonthlyPerformanceSnapshotResponse(
     string MonthlyPerformanceSnapshotId,
     string MonthKey,
+    string ContentLanguage,
+    string PrimaryConversionAction,
     int PostsPublished,
     int VideosCreated,
     int GraphicsCreated,

@@ -82,9 +82,9 @@ public sealed class ProcessManyChatEventUseCase
 
         var inferredStage = InferStage(messageText, ctaKeyword);
         var finalStage = existingLead is null ? inferredStage : MaxStage(existingLead.CurrentStage, inferredStage);
-        var triggeredFlow = ResolveFlow(finalStage);
-        var tagsToAdd = ResolveTags(finalStage, ctaKeyword);
-        var fieldsToUpsert = ResolveFields(finalStage, messageText, ctaKeyword, request.Channel);
+        var triggeredFlow = ResolveFlow(finalStage, tenant.Profile);
+        var tagsToAdd = ResolveTags(finalStage, ctaKeyword, tenant.Profile);
+        var fieldsToUpsert = ResolveFields(finalStage, messageText, ctaKeyword, request.Channel, tenant.Profile);
 
         var mergedTags = MergeTags(existingState?.Tags ?? request.CurrentTags, tagsToAdd);
         var mergedFields = MergeFields(existingState?.Fields ?? request.CurrentFields, fieldsToUpsert);
@@ -98,7 +98,7 @@ public sealed class ProcessManyChatEventUseCase
             NormalizeValue(request.Email, existingLead?.Email, "unknown@example.invalid"),
             NormalizeValue(request.Channel, existingLead?.Channel, "ManyChat"),
             finalStage,
-            BuildIntentSummary(finalStage, ctaKeyword, messageText),
+            BuildIntentSummary(finalStage, ctaKeyword, messageText, tenant.Profile),
             messageText,
             _clock.UtcNow);
 
@@ -148,17 +148,24 @@ public sealed class ProcessManyChatEventUseCase
     private static LeadLifecycleStage MaxStage(LeadLifecycleStage current, LeadLifecycleStage candidate) =>
         (LeadLifecycleStage)Math.Max((int)current, (int)candidate);
 
-    private static string ResolveFlow(LeadLifecycleStage stage) => stage switch
+    private static string ResolveFlow(LeadLifecycleStage stage, Domain.Tenants.ClientProfile profile) => stage switch
     {
         LeadLifecycleStage.BookingReady => "booking-agent-entry",
+        LeadLifecycleStage.MarketingQualified when RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl) => "leadgen-keyword-booking-handoff",
         LeadLifecycleStage.MarketingQualified => "leadgen-keyword-capture",
         LeadLifecycleStage.Engaged => "leadgen-nurture",
         _ => "leadgen-welcome"
     };
 
-    private static IReadOnlyList<string> ResolveTags(LeadLifecycleStage stage, string ctaKeyword) => stage switch
+    private static IReadOnlyList<string> ResolveTags(LeadLifecycleStage stage, string ctaKeyword, Domain.Tenants.ClientProfile profile) => stage switch
     {
         LeadLifecycleStage.BookingReady => ["booking-intent", "hot-lead"],
+        LeadLifecycleStage.MarketingQualified when RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl) =>
+        [
+            "leadgen-keyword",
+            $"keyword-{ctaKeyword.ToLowerInvariant()}",
+            "booking-link-ready"
+        ],
         LeadLifecycleStage.MarketingQualified => ["leadgen-keyword", $"keyword-{ctaKeyword.ToLowerInvariant()}"],
         LeadLifecycleStage.Engaged => ["engaged-lead"],
         _ => ["new-lead"]
@@ -168,8 +175,10 @@ public sealed class ProcessManyChatEventUseCase
         LeadLifecycleStage stage,
         string messageText,
         string ctaKeyword,
-        string channel) =>
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        string channel,
+        Domain.Tenants.ClientProfile profile)
+    {
+        var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["lead_stage"] = stage.ToString(),
             ["last_intent"] = stage switch
@@ -180,13 +189,25 @@ public sealed class ProcessManyChatEventUseCase
                 _ => "new"
             },
             ["cta_keyword"] = ctaKeyword,
+            ["desired_action"] = profile.DesiredAction,
+            ["content_language"] = profile.ContentLanguage,
             ["last_channel"] = string.IsNullOrWhiteSpace(channel) ? "ManyChat" : channel.Trim(),
             ["last_message_excerpt"] = messageText.Length <= 120 ? messageText : messageText[..120]
         };
 
-    private static string BuildIntentSummary(LeadLifecycleStage stage, string ctaKeyword, string messageText) => stage switch
+        if (!string.IsNullOrWhiteSpace(profile.CalendlyUrl))
+        {
+            fields["calendly_url"] = profile.CalendlyUrl;
+        }
+
+        return fields;
+    }
+
+    private static string BuildIntentSummary(LeadLifecycleStage stage, string ctaKeyword, string messageText, Domain.Tenants.ClientProfile profile) => stage switch
     {
         LeadLifecycleStage.BookingReady => "Lead explicitly signaled booking intent through the ManyChat conversation.",
+        LeadLifecycleStage.MarketingQualified when RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl) =>
+            $"Lead triggered the CTA keyword '{ctaKeyword}' and should receive a booking handoff aligned to '{profile.DesiredAction}'.",
         LeadLifecycleStage.MarketingQualified => $"Lead triggered the CTA keyword '{ctaKeyword}' and should enter the lead capture flow.",
         LeadLifecycleStage.Engaged => $"Lead replied through ManyChat and should remain in nurture. Latest message: {messageText}",
         _ => "Lead was created from ManyChat event intake."
@@ -234,4 +255,10 @@ public sealed class ProcessManyChatEventUseCase
 
         return merged;
     }
+
+    private static bool RequiresBookingCallToAction(Domain.Tenants.ClientProfile profile) =>
+        ContainsKeyword(profile.DesiredAction, "book") ||
+        ContainsKeyword(profile.DesiredAction, "consult") ||
+        ContainsKeyword(profile.DesiredAction, "call") ||
+        ContainsKeyword(profile.DesiredAction, "appointment");
 }

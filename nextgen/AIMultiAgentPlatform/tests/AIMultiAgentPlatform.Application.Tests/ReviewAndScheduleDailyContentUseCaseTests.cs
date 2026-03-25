@@ -88,6 +88,48 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
         Assert.Equal(SchedulingStatus.Blocked, schedulingRepository.Saved!.Status);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_OptimizesForBookingDesiredActionAndLanguage()
+    {
+        var tenant = CreateTenant(
+            ["Instagram", "LinkedIn"],
+            ["Politics"],
+            calendlyUrl: "https://calendly.com/rnm-growth/consultation",
+            desiredAction: "Book a consultation from the content",
+            contentLanguage: "Bilingual");
+        var request = new DailyContentRequest("daily_request_010", tenant.TenantId, "backlog_001", 4, DateTime.UtcNow, "corr-456");
+        var brief = new DailyContentBrief("brief_010", request.DailyContentRequestId, tenant.TenantId, ContentCategory.Authority, PrimaryFormat.ShortVideo, "Authority topic", "Teach the smarter move", "Open with the hidden edge", "Core message around authority", "BOOK", "Bold");
+        var primaryAsset = new PrimaryAsset("primary_asset_010", request.DailyContentRequestId, tenant.TenantId, PrimaryFormat.ShortVideo, "Short video: Authority topic", "Open with the hidden edge. Authority topic.", "HOOK: Open with the hidden edge.\nBODY: Teach the smarter move.\nPAYOFF: Tie it back to the offer.", "Give one next step.", "Invite the audience to book through https://calendly.com/rnm-growth/consultation or DM 'BOOK' if they want help first.", "15-45 second HeyGen-compatible script. Format key lines in both English and Spanish.");
+        var caption = new CaptionAsset("caption_010", request.DailyContentRequestId, "Open with the hidden edge. Teach the smarter move. Book through https://calendly.com/rnm-growth/consultation or DM 'BOOK' to keep the conversation going.", "Ask what result they want before they book.", "BOOK", ["#B2BConsultants"]);
+        var bundle = new RepurposedAssetBundle("repurpose_010", request.DailyContentRequestId, "Carousel CTA -> Book via https://calendly.com/rnm-growth/consultation", ["Frame 1", "Frame 2", "Frame 3"], "LinkedIn post with booking CTA", "Quote", "Clip idea", ["Hook 1", "Ready to take action? Book through https://calendly.com/rnm-growth/consultation or DM 'BOOK'."]);
+
+        var useCase = CreateUseCase(
+            tenant,
+            request,
+            brief,
+            primaryAsset,
+            caption,
+            bundle,
+            out _,
+            out var qualityRepository,
+            out _,
+            out var schedulingRepository);
+
+        var result = await useCase.ExecuteAsync(
+            new ReviewAndScheduleDailyContentCommand(
+                new ReviewAndScheduleDailyContentRequest(tenant.TenantId.Value, request.DailyContentRequestId)),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains("desired action 'Book a consultation from the content'", qualityRepository.Saved!.Feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("https://calendly.com/rnm-growth/consultation", qualityRepository.Saved.OptimizedCallToAction, StringComparison.OrdinalIgnoreCase);
+        Assert.All(schedulingRepository.Saved!.Targets, target =>
+        {
+            Assert.Contains("Book via https://calendly.com/rnm-growth/consultation", target.PayloadSummary, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Language: Bilingual", target.PayloadSummary, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
     private static ReviewAndScheduleDailyContentUseCase CreateUseCase(
         Tenant tenant,
         DailyContentRequest request,
@@ -120,7 +162,12 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
             new FixedClock());
     }
 
-    private static Tenant CreateTenant(IReadOnlyList<string> platforms, IReadOnlyList<string> avoidTopics) =>
+    private static Tenant CreateTenant(
+        IReadOnlyList<string> platforms,
+        IReadOnlyList<string> avoidTopics,
+        string calendlyUrl = "",
+        string desiredAction = "",
+        string contentLanguage = "English") =>
         Tenant.Create(
             new TenantId("tenant_001"),
             "rnm-growth",
@@ -136,7 +183,10 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
                 platforms,
                 ["Low visibility"],
                 ["No time"],
-                avoidTopics),
+                avoidTopics,
+                CalendlyUrl: calendlyUrl,
+                DesiredAction: desiredAction,
+                ContentLanguage: contentLanguage),
             new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc));
 
     private sealed class DeterministicIdGenerator : IIdGenerator

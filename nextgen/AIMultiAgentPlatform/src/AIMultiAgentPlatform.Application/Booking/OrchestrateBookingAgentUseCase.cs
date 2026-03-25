@@ -7,6 +7,7 @@ using AIMultiAgentPlatform.Domain.Communications;
 using AIMultiAgentPlatform.Domain.FollowUps;
 using AIMultiAgentPlatform.Domain.Leads;
 using AIMultiAgentPlatform.Domain.Reminders;
+using AIMultiAgentPlatform.Domain.Tenants;
 
 namespace AIMultiAgentPlatform.Application.Booking;
 
@@ -74,8 +75,8 @@ public sealed class OrchestrateBookingAgentUseCase
         }
 
         var manyChatState = await _manyChatContactStateRepository.FindByContactAsync(request.TenantId, request.ManyChatContactId, cancellationToken);
-        var calendlyEventType = string.IsNullOrWhiteSpace(request.CalendlyEventType) ? "discovery-call" : request.CalendlyEventType.Trim();
-        var calendlyUrl = $"https://calendly.com/{tenant.Slug}/{calendlyEventType}?contact={Uri.EscapeDataString(lead.ManyChatContactId)}";
+        var calendlyEventType = ResolveCalendlyEventType(request.CalendlyEventType, tenant.Profile.CalendlyUrl);
+        var calendlyUrl = ResolveCalendlyUrl(tenant, lead, calendlyEventType);
 
         if (outcome == BookingStatus.Booked && request.AppointmentUtc is null)
         {
@@ -289,6 +290,69 @@ public sealed class OrchestrateBookingAgentUseCase
             .Select(tag => tag.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+    private static string ResolveCalendlyEventType(string? requestedEventType, string? tenantCalendlyUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedEventType))
+        {
+            return requestedEventType.Trim();
+        }
+
+        if (Uri.TryCreate(tenantCalendlyUrl, UriKind.Absolute, out var calendlyUri))
+        {
+            var segments = calendlyUri.AbsolutePath
+                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (segments.Length >= 2)
+            {
+                return segments[^1];
+            }
+        }
+
+        return "discovery-call";
+    }
+
+    private static string ResolveCalendlyUrl(Tenant tenant, LeadProfile lead, string calendlyEventType)
+    {
+        if (Uri.TryCreate(tenant.Profile.CalendlyUrl, UriKind.Absolute, out var tenantCalendlyUri))
+        {
+            return AppendQueryParameter(tenantCalendlyUri, "contact", lead.ManyChatContactId);
+        }
+
+        return $"https://calendly.com/{tenant.Slug}/{calendlyEventType}?contact={Uri.EscapeDataString(lead.ManyChatContactId)}";
+    }
+
+    private static string AppendQueryParameter(Uri uri, string key, string value)
+    {
+        var query = ParseQueryString(uri.Query);
+        query[key] = value;
+
+        return new UriBuilder(uri)
+        {
+            Query = string.Join(
+                "&",
+                query.Select(pair => $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value)}"))
+        }.Uri.ToString();
+    }
+
+    private static Dictionary<string, string> ParseQueryString(string? query)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return values;
+        }
+
+        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var tokens = pair.Split('=', 2);
+            var decodedKey = Uri.UnescapeDataString(tokens[0]);
+            var decodedValue = tokens.Length > 1 ? Uri.UnescapeDataString(tokens[1]) : string.Empty;
+            values[decodedKey] = decodedValue;
+        }
+
+        return values;
+    }
 
     private static IReadOnlyDictionary<string, string> MergeFields(
         IReadOnlyDictionary<string, string>? existing,

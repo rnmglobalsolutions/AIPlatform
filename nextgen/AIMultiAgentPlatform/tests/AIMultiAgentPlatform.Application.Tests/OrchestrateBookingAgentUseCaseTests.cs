@@ -99,7 +99,40 @@ public sealed class OrchestrateBookingAgentUseCaseTests
         Assert.Equal("follow-up-sequence-start", stateRepository.Saved!.TriggeredFlow);
     }
 
-    private static Tenant CreateTenant() =>
+    [Fact]
+    public async Task ExecuteAsync_WhenTenantHasCalendlyUrl_UsesConfiguredLink()
+    {
+        var tenant = CreateTenant("https://calendly.com/rnm-growth/custom-intro");
+        var lead = CreateLead(tenant.TenantId, "contact_003", LeadLifecycleStage.BookingReady);
+        var state = CreateState(tenant.TenantId, "contact_003");
+
+        var useCase = CreateUseCase(
+            tenant,
+            lead,
+            state,
+            out var bookingRepository,
+            out _,
+            out _,
+            out _,
+            out _);
+
+        var result = await useCase.ExecuteAsync(
+            new OrchestrateBookingAgentCommand(
+                new OrchestrateBookingAgentRequest(
+                    tenant.TenantId.Value,
+                    "contact_003",
+                    "Requested")),
+            CancellationToken.None);
+
+        var savedBooking = bookingRepository.Saved;
+        Assert.True(result.IsSuccess);
+        Assert.Equal("https://calendly.com/rnm-growth/custom-intro?contact=contact_003", result.Value!.CalendlyUrl);
+        Assert.NotNull(savedBooking);
+        Assert.Equal("custom-intro", savedBooking!.EventType);
+        Assert.Equal("https://calendly.com/rnm-growth/custom-intro?contact=contact_003", savedBooking.CalendlyUrl);
+    }
+
+    private static Tenant CreateTenant(string calendlyUrl = "") =>
         Tenant.Create(
             new TenantId("tenant_001"),
             "rnm-growth",
@@ -115,7 +148,8 @@ public sealed class OrchestrateBookingAgentUseCaseTests
                 ["Instagram", "Messenger"],
                 ["Low engagement"],
                 ["No time"],
-                ["Politics"]),
+                ["Politics"],
+                CalendlyUrl: calendlyUrl),
             new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc));
 
     private static LeadProfile CreateLead(TenantId tenantId, string contactId, LeadLifecycleStage stage) =>

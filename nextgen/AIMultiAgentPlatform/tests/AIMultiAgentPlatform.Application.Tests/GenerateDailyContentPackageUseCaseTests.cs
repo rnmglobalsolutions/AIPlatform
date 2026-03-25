@@ -122,6 +122,67 @@ public sealed class GenerateDailyContentPackageUseCaseTests
         Assert.Equal("daily-content.sequence.not-found", result.ErrorCode);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_UsesTenantLanguageAndDesiredActionInGeneratedContent()
+    {
+        var tenant = Tenant.Create(
+            new TenantId("tenant_002"),
+            "acme-tax",
+            new ClientProfile(
+                "Acme Tax",
+                "John Doe",
+                "john@acme.test",
+                "Tax services",
+                "Tax planning",
+                "Small business owners",
+                "Professional",
+                "BOOK",
+                ["Instagram", "LinkedIn"],
+                ["Confusing deadlines"],
+                ["Too expensive"],
+                ["Politics"],
+                CalendlyUrl: "https://calendly.com/acme-tax/consultation",
+                MainGoal: "Book more consultations",
+                DesiredAction: "Book a consultation from the content",
+                ContentLanguage: "Bilingual"),
+            DateTime.UtcNow);
+
+        var backlog = new EditorialBacklog(
+            "backlog_002",
+            tenant.TenantId,
+            14,
+            DateTime.UtcNow,
+            [new EditorialBacklogItem(1, 0, ContentCategory.Authority, PrimaryFormat.ShortVideo, "Tax planning", "Show the planning shortcut", "Lead with the overlooked mistake", "comments_or_dms", true)]);
+
+        var briefRepository = new FakeDailyContentBriefRepository();
+        var primaryAssetRepository = new FakePrimaryAssetRepository();
+        var captionAssetRepository = new FakeCaptionAssetRepository();
+        var bundleRepository = new FakeRepurposedAssetBundleRepository();
+
+        var useCase = new GenerateDailyContentPackageUseCase(
+            new FakeTenantRepository(tenant),
+            new FakeEditorialBacklogRepository(backlog),
+            new FakeDailyContentRequestRepository(),
+            briefRepository,
+            primaryAssetRepository,
+            captionAssetRepository,
+            bundleRepository,
+            new DeterministicIdGenerator(),
+            new FixedClock());
+
+        var result = await useCase.ExecuteAsync(
+            new GenerateDailyContentPackageCommand(
+                new GenerateDailyContentPackageRequest(tenant.TenantId.Value, backlog.EditorialBacklogId, 1)),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains("bilingual format", briefRepository.Saved!.CoreMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("book directly through https://calendly.com/acme-tax/consultation", primaryAssetRepository.Saved!.CallToAction, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("English and Spanish", primaryAssetRepository.Saved.ProductionNotes, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("https://calendly.com/acme-tax/consultation", captionAssetRepository.Saved!.Caption, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Book via https://calendly.com/acme-tax/consultation", bundleRepository.Saved!.CarouselOutline, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class DeterministicIdGenerator : IIdGenerator
     {
         private int _sequence;

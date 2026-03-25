@@ -203,10 +203,14 @@ public sealed class ReviewAndScheduleDailyContentUseCase
         CaptionAsset captionAsset,
         RepurposedAssetBundle repurposedAssetBundle)
     {
+        var desiredActionAligned = IsDesiredActionAligned(tenant.Profile, primaryAsset, captionAsset, repurposedAssetBundle);
+        var languageAligned = IsLanguageAligned(tenant.Profile, primaryAsset, captionAsset);
         var hookScore = Score(primaryAsset.Hook.Length is > 20 and < 140, 8.8, 7.2);
         var clarityScore = Score(primaryAsset.Body.Contains("BODY:", StringComparison.Ordinal), 8.5, 7.0);
         var relevanceScore = Score(brief.CoreMessage.Contains(tenant.Profile.Offer, StringComparison.OrdinalIgnoreCase), 9.0, 7.4);
         var leadGenerationScore = Score(
+            desiredActionAligned &&
+            languageAligned &&
             captionAsset.Caption.Contains(brief.CallToActionKeyword, StringComparison.OrdinalIgnoreCase) &&
             repurposedAssetBundle.CommentHooks.Count >= 2,
             9.1,
@@ -214,8 +218,8 @@ public sealed class ReviewAndScheduleDailyContentUseCase
 
         var overall = Math.Round((hookScore + clarityScore + relevanceScore + leadGenerationScore) / 4.0, 2);
         var feedback =
-            $"Strongest area: lead generation around keyword {brief.CallToActionKeyword}. Improve by tightening the opening line and keeping the payoff more outcome-specific for {tenant.Profile.TargetAudience.ToLowerInvariant()}.";
-        var optimizedCallToAction = $"Invite the audience to comment '{brief.CallToActionKeyword}' for the framework and DM them the next step.";
+            $"Strongest area: lead generation around keyword {brief.CallToActionKeyword}. Improve by tightening the opening line, keeping the payoff more outcome-specific for {tenant.Profile.TargetAudience.ToLowerInvariant()}, and staying aligned to the desired action '{tenant.Profile.DesiredAction}'.";
+        var optimizedCallToAction = BuildOptimizedCallToAction(tenant.Profile, brief.CallToActionKeyword);
 
         return new QualityReview(
             _idGenerator.NewId("quality"),
@@ -278,7 +282,7 @@ public sealed class ReviewAndScheduleDailyContentUseCase
             .Select(platform => new PublicationTarget(
                 platform,
                 scheduledUtc,
-                $"{primaryAsset.PrimaryFormat}: {primaryAsset.Headline} | CTA: {captionAsset.CallToActionKeyword}"))
+                $"{primaryAsset.PrimaryFormat}: {primaryAsset.Headline} | CTA: {ResolveTargetCallToAction(tenant.Profile, captionAsset.CallToActionKeyword)} | Language: {tenant.Profile.ContentLanguage}"))
             .ToArray();
 
         return new SchedulingJob(
@@ -299,4 +303,85 @@ public sealed class ReviewAndScheduleDailyContentUseCase
         corpus.Contains(value, StringComparison.OrdinalIgnoreCase);
 
     private static double Score(bool condition, double whenTrue, double whenFalse) => condition ? whenTrue : whenFalse;
+
+    private static bool IsDesiredActionAligned(
+        Domain.Tenants.ClientProfile profile,
+        PrimaryAsset primaryAsset,
+        CaptionAsset captionAsset,
+        RepurposedAssetBundle repurposedAssetBundle)
+    {
+        var corpus = string.Join(
+            "\n",
+            profile.DesiredAction,
+            primaryAsset.CallToAction,
+            captionAsset.Caption,
+            repurposedAssetBundle.CarouselOutline,
+            repurposedAssetBundle.LinkedInPost,
+            string.Join("\n", repurposedAssetBundle.CommentHooks));
+
+        if (RequiresBookingCallToAction(profile))
+        {
+            return ContainsIgnoreCase(corpus, "book") ||
+                   ContainsIgnoreCase(corpus, "consult") ||
+                   ContainsIgnoreCase(corpus, profile.CalendlyUrl);
+        }
+
+        if (ContainsIgnoreCase(profile.DesiredAction, "dm") || ContainsIgnoreCase(profile.DesiredAction, "message"))
+        {
+            return ContainsIgnoreCase(corpus, "dm") || ContainsIgnoreCase(corpus, "message");
+        }
+
+        if (ContainsIgnoreCase(profile.DesiredAction, "comment"))
+        {
+            return ContainsIgnoreCase(corpus, "comment");
+        }
+
+        return ContainsIgnoreCase(corpus, profile.CallToActionKeyword);
+    }
+
+    private static bool IsLanguageAligned(
+        Domain.Tenants.ClientProfile profile,
+        PrimaryAsset primaryAsset,
+        CaptionAsset captionAsset)
+    {
+        var corpus = string.Join("\n", primaryAsset.ProductionNotes, primaryAsset.Body, captionAsset.Caption);
+
+        return profile.ContentLanguage switch
+        {
+            "Spanish" => ContainsIgnoreCase(corpus, "spanish"),
+            "Bilingual" => ContainsIgnoreCase(corpus, "english") && ContainsIgnoreCase(corpus, "spanish"),
+            _ => true
+        };
+    }
+
+    private static string BuildOptimizedCallToAction(Domain.Tenants.ClientProfile profile, string callToActionKeyword)
+    {
+        if (RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl))
+        {
+            return $"Invite the audience to book through {profile.CalendlyUrl} and DM '{callToActionKeyword}' if they want help before scheduling.";
+        }
+
+        if (ContainsIgnoreCase(profile.DesiredAction, "comment"))
+        {
+            return $"Invite the audience to comment '{callToActionKeyword}' and continue the conversation in DMs.";
+        }
+
+        if (ContainsIgnoreCase(profile.DesiredAction, "dm") || ContainsIgnoreCase(profile.DesiredAction, "message"))
+        {
+            return $"Invite the audience to DM '{callToActionKeyword}' so the team can guide them to the next step.";
+        }
+
+        return $"Invite the audience to {profile.DesiredAction.ToLowerInvariant()} and use '{callToActionKeyword}' as the conversion keyword.";
+    }
+
+    private static string ResolveTargetCallToAction(Domain.Tenants.ClientProfile profile, string callToActionKeyword) =>
+        RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl)
+            ? $"Book via {profile.CalendlyUrl}"
+            : callToActionKeyword;
+
+    private static bool RequiresBookingCallToAction(Domain.Tenants.ClientProfile profile) =>
+        ContainsIgnoreCase(profile.DesiredAction, "book") ||
+        ContainsIgnoreCase(profile.DesiredAction, "consult") ||
+        ContainsIgnoreCase(profile.DesiredAction, "appointment") ||
+        ContainsIgnoreCase(profile.DesiredAction, "call");
 }

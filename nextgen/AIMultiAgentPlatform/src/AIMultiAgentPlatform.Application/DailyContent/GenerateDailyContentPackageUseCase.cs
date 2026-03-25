@@ -120,8 +120,9 @@ public sealed class GenerateDailyContentPackageUseCase
         ClientProfile profile,
         EditorialBacklogItem backlogItem)
     {
+        var languageGuidance = BuildLanguageGuidance(profile);
         var coreMessage =
-            $"{backlogItem.Angle}. Show {profile.TargetAudience.ToLowerInvariant()} how {profile.Offer.ToLowerInvariant()} helps them move past {backlogItem.Topic.ToLowerInvariant()} without sounding repetitive.";
+            $"{backlogItem.Angle}. Show {profile.TargetAudience.ToLowerInvariant()} how {profile.Offer.ToLowerInvariant()} helps them move past {backlogItem.Topic.ToLowerInvariant()} without sounding repetitive. {languageGuidance} Keep it aligned to the goal of {profile.MainGoal.ToLowerInvariant()} and the desired action of {profile.DesiredAction.ToLowerInvariant()}.";
 
         return new DailyContentBrief(
             _idGenerator.NewId("brief"),
@@ -146,17 +147,18 @@ public sealed class GenerateDailyContentPackageUseCase
             ? $"Short video: {brief.Topic}"
             : $"Graphic post: {brief.Topic}";
 
+        var languageFormatInstruction = BuildLanguageFormatInstruction(profile);
         var hook = $"{brief.HookDirection}. {brief.Topic}.";
         var body = brief.PrimaryFormat == PrimaryFormat.ShortVideo
-            ? $"HOOK: {hook}\nBODY: Teach one practical shift around {brief.Angle.ToLowerInvariant()} for {profile.TargetAudience.ToLowerInvariant()}.\nPAYOFF: Tie the lesson back to {profile.Offer.ToLowerInvariant()} with a clear next step."
-            : $"Lead with a bold headline about {brief.Topic}. Reinforce {brief.Angle.ToLowerInvariant()} in concise supporting copy for a Canva-ready branded graphic.";
+            ? $"HOOK: {hook}\nBODY: Teach one practical shift around {brief.Angle.ToLowerInvariant()} for {profile.TargetAudience.ToLowerInvariant()}. {languageFormatInstruction}\nPAYOFF: Tie the lesson back to {profile.Offer.ToLowerInvariant()} with a clear next step that supports {profile.MainGoal.ToLowerInvariant()}."
+            : $"Lead with a bold headline about {brief.Topic}. Reinforce {brief.Angle.ToLowerInvariant()} in concise supporting copy for a Canva-ready branded graphic. {languageFormatInstruction}";
         var payoff = brief.PrimaryFormat == PrimaryFormat.ShortVideo
-            ? $"Leave the viewer with one simple action they can take today to improve {profile.Niche.ToLowerInvariant()} performance."
-            : $"Make the visual feel actionable and save-worthy so the audience wants to revisit the message later.";
-        var callToAction = $"Invite the audience to comment or DM '{brief.CallToActionKeyword}'.";
+            ? $"Leave the viewer with one simple action they can take today to improve {profile.Niche.ToLowerInvariant()} performance and move closer to {profile.MainGoal.ToLowerInvariant()}."
+            : $"Make the visual feel actionable and save-worthy so the audience wants to revisit the message later and feel ready to {profile.DesiredAction.ToLowerInvariant()}.";
+        var callToAction = BuildCallToAction(profile, brief.CallToActionKeyword);
         var productionNotes = brief.PrimaryFormat == PrimaryFormat.ShortVideo
-            ? "15-45 second HeyGen-compatible script. Keep cadence natural, conversational, and easy to subtitle."
-            : "Design in Canva with strong brand hierarchy, one core message, and a CTA-ready footer treatment.";
+            ? $"15-45 second HeyGen-compatible script. {languageFormatInstruction} Keep cadence natural, conversational, and easy to subtitle in {profile.ContentLanguage.ToLowerInvariant()}."
+            : $"Design in Canva with strong brand hierarchy, one core message, and a CTA-ready footer treatment. {languageFormatInstruction}";
 
         return new PrimaryAsset(
             _idGenerator.NewId("primary_asset"),
@@ -177,9 +179,10 @@ public sealed class GenerateDailyContentPackageUseCase
         PrimaryAsset primaryAsset,
         ClientProfile profile)
     {
-        var engagementPrompt = $"Ask the audience what part of {brief.Topic.ToLowerInvariant()} is slowing them down most.";
+        var engagementPrompt = BuildEngagementPrompt(profile, brief);
+        var desiredActionPrompt = BuildDesiredActionPrompt(profile, brief.CallToActionKeyword);
         var caption =
-            $"{primaryAsset.Hook} {brief.Angle}. {brief.CoreMessage} {engagementPrompt} Comment or DM '{brief.CallToActionKeyword}' to keep the conversation going.";
+            $"{primaryAsset.Hook} {brief.Angle}. {brief.CoreMessage} {engagementPrompt} {desiredActionPrompt}";
 
         return new CaptionAsset(
             _idGenerator.NewId("caption"),
@@ -197,28 +200,28 @@ public sealed class GenerateDailyContentPackageUseCase
         ClientProfile profile)
     {
         var carouselOutline =
-            $"Slide 1: {brief.Topic}\nSlide 2: Why this matters\nSlide 3: The common mistake\nSlide 4: The better move\nSlide 5: CTA -> {brief.CallToActionKeyword}";
+            $"Slide 1: {brief.Topic}\nSlide 2: Why this matters\nSlide 3: The common mistake\nSlide 4: The better move\nSlide 5: CTA -> {BuildRepurposeCallToAction(profile, brief.CallToActionKeyword)}";
 
         var storyFrames = new[]
         {
             $"Frame 1: Quick tension around {brief.Topic}",
             $"Frame 2: One insight on {brief.Angle.ToLowerInvariant()}",
-            $"Frame 3: CTA sticker -> {brief.CallToActionKeyword}"
+            $"Frame 3: CTA sticker -> {BuildRepurposeCallToAction(profile, brief.CallToActionKeyword)}"
         };
 
         var linkedInPost =
-            $"Most teams don’t have a content problem. They have a positioning problem around {brief.Topic.ToLowerInvariant()}. {brief.Angle}.\n\n{brief.CoreMessage}\n\nIf you want the framework, comment {brief.CallToActionKeyword}.";
+            $"Most teams don’t have a content problem. They have a positioning problem around {brief.Topic.ToLowerInvariant()}. {brief.Angle}.\n\n{brief.CoreMessage}\n\n{BuildDesiredActionPrompt(profile, brief.CallToActionKeyword)}";
 
         var quotePost =
             $"\"{brief.Angle}. The right content turns attention into conversations and conversations into qualified demand.\"";
 
         var shortClipIdea =
-            $"Create a 10-second clip that isolates the strongest line from the hook: '{primaryAsset.Hook}' and pair it with fast captions plus a CTA for {brief.CallToActionKeyword}.";
+            $"Create a 10-second clip that isolates the strongest line from the hook: '{primaryAsset.Hook}' and pair it with fast captions plus a CTA for {BuildRepurposeCallToAction(profile, brief.CallToActionKeyword)}.";
 
         var commentHooks = new[]
         {
             $"What is the biggest blocker you see around {brief.Topic.ToLowerInvariant()}?",
-            $"Would a template for this help? Comment {brief.CallToActionKeyword}.",
+            BuildFollowUpQuestion(profile, brief.CallToActionKeyword),
             $"Which part feels harder right now: consistency or conversion?"
         };
 
@@ -231,6 +234,105 @@ public sealed class GenerateDailyContentPackageUseCase
             quotePost,
             shortClipIdea,
             commentHooks);
+    }
+
+    private static string BuildLanguageGuidance(ClientProfile profile) =>
+        profile.ContentLanguage switch
+        {
+            "Spanish" => "Write the content in Spanish.",
+            "Bilingual" => "Deliver the content in bilingual format with English first and Spanish immediately after when practical.",
+            _ => "Write the content in English."
+        };
+
+    private static string BuildLanguageFormatInstruction(ClientProfile profile) =>
+        profile.ContentLanguage switch
+        {
+            "Spanish" => "Use Spanish-first phrasing.",
+            "Bilingual" => "Format key lines in both English and Spanish.",
+            _ => "Use English-first phrasing."
+        };
+
+    private static string BuildCallToAction(ClientProfile profile, string callToActionKeyword)
+    {
+        if (RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl))
+        {
+            return $"Invite the audience to book directly through {profile.CalendlyUrl} or DM '{callToActionKeyword}' if they want help first.";
+        }
+
+        if (ContainsAny(profile.DesiredAction, "comment"))
+        {
+            return $"Invite the audience to comment '{callToActionKeyword}'.";
+        }
+
+        if (ContainsAny(profile.DesiredAction, "dm", "message"))
+        {
+            return $"Invite the audience to DM '{callToActionKeyword}'.";
+        }
+
+        if (RequiresBookingCallToAction(profile))
+        {
+            return $"Invite the audience to book a consultation and mention '{callToActionKeyword}' when they reach out.";
+        }
+
+        return $"Invite the audience to {profile.DesiredAction.ToLowerInvariant()} and use '{callToActionKeyword}' as the conversion keyword.";
+    }
+
+    private static string BuildDesiredActionPrompt(ClientProfile profile, string callToActionKeyword)
+    {
+        if (RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl))
+        {
+            return $"Book through {profile.CalendlyUrl} or DM '{callToActionKeyword}' if you want the right next step.";
+        }
+
+        if (ContainsAny(profile.DesiredAction, "comment"))
+        {
+            return $"Comment '{callToActionKeyword}' to keep the conversation going.";
+        }
+
+        if (ContainsAny(profile.DesiredAction, "dm", "message"))
+        {
+            return $"DM '{callToActionKeyword}' to keep the conversation going.";
+        }
+
+        if (RequiresBookingCallToAction(profile))
+        {
+            return $"Book a consultation or message '{callToActionKeyword}' if you want support.";
+        }
+
+        return $"{profile.DesiredAction.TrimEnd('.')} and use '{callToActionKeyword}' to keep the conversation moving.";
+    }
+
+    private static string BuildRepurposeCallToAction(ClientProfile profile, string callToActionKeyword) =>
+        RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl)
+            ? $"Book via {profile.CalendlyUrl}"
+            : callToActionKeyword;
+
+    private static string BuildEngagementPrompt(ClientProfile profile, DailyContentBrief brief) =>
+        RequiresBookingCallToAction(profile)
+            ? $"Ask the audience what result they want before they book around {brief.Topic.ToLowerInvariant()}."
+            : $"Ask the audience what part of {brief.Topic.ToLowerInvariant()} is slowing them down most.";
+
+    private static string BuildFollowUpQuestion(ClientProfile profile, string callToActionKeyword)
+    {
+        if (RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl))
+        {
+            return $"Ready to take action? Book through {profile.CalendlyUrl} or DM '{callToActionKeyword}'.";
+        }
+
+        return $"Would a template for this help? Comment {callToActionKeyword}.";
+    }
+
+    private static bool RequiresBookingCallToAction(ClientProfile profile) =>
+        ContainsAny(profile.DesiredAction, "book", "consult", "call", "appointment");
+
+    private static bool ContainsAny(string? value, params string[] fragments)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return fragments.Any(fragment => value.Contains(fragment, StringComparison.OrdinalIgnoreCase));
     }
 
     private static IReadOnlyList<string> BuildHashtags(ClientProfile profile)
