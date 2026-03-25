@@ -20,6 +20,8 @@ param tags object = {}
 
 var isLean = toLower(platformMode) == 'lean'
 var deploymentStorageContainerName = 'function-releases'
+var tallyWebhookSigningSecretName = 'tally-webhook-signing-secret'
+var tallyWebhookSigningSecretReference = '@Microsoft.KeyVault(SecretUri=${keyVaultUri}secrets/${tallyWebhookSigningSecretName}/)'
 var storageBlobEndpoint = storageAccount.properties.primaryEndpoints.blob
 var deploymentStorageContainerUrl = '${storageBlobEndpoint}${deploymentStorageContainerName}'
 var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};EndpointSuffix=${environment().suffixes.storage};AccountKey=${storageAccount.listKeys().keys[0].value}'
@@ -94,6 +96,7 @@ resource apiWebApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
     serverFarmId: apiAppServicePlan.id
     httpsOnly: true
     clientAffinityEnabled: false
+    keyVaultReferenceIdentity: managedIdentity.id
     siteConfig: {
       linuxFxVersion: 'DOTNETCORE|10.0'
       appSettings: [
@@ -132,6 +135,10 @@ resource apiWebApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
         {
           name: 'KeyVault__VaultUri'
           value: keyVaultUri
+        }
+        {
+          name: 'TallyWebhook__SigningSecret'
+          value: tallyWebhookSigningSecretReference
         }
         {
           name: 'Storage__BlobServiceUri'
@@ -185,6 +192,7 @@ resource leanFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (isLean) {
     serverFarmId: workerFlexConsumptionPlan.id
     httpsOnly: true
     clientAffinityEnabled: false
+    keyVaultReferenceIdentity: managedIdentity.id
     functionAppConfig: {
       deployment: {
         storage: {
@@ -261,6 +269,10 @@ resource leanFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (isLean) {
           value: keyVaultUri
         }
         {
+          name: 'TallyWebhook__SigningSecret'
+          value: tallyWebhookSigningSecretReference
+        }
+        {
           name: 'Storage__BlobServiceUri'
           value: storageBlobEndpoint
         }
@@ -295,6 +307,7 @@ resource productionFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
     serverFarmId: apiAppServicePlan.id
     httpsOnly: true
     clientAffinityEnabled: false
+    keyVaultReferenceIdentity: managedIdentity.id
     siteConfig: {
       linuxFxVersion: 'DOTNET-ISOLATED|10.0'
       appSettings: [
@@ -349,6 +362,10 @@ resource productionFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
         {
           name: 'KeyVault__VaultUri'
           value: keyVaultUri
+        }
+        {
+          name: 'TallyWebhook__SigningSecret'
+          value: tallyWebhookSigningSecretReference
         }
         {
           name: 'Storage__BlobServiceUri'
