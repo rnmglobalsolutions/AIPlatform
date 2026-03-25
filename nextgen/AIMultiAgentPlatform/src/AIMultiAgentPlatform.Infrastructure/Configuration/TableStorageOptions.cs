@@ -6,7 +6,8 @@ public sealed record TableStorageOptions(
     string ConnectionString,
     string TenantTableName,
     string StrategyPlanTableName,
-    string EditorialBacklogTableName)
+    string EditorialBacklogTableName,
+    string TallySubmissionReceiptTableName)
 {
     public static TableStorageOptions Resolve(IConfiguration configuration)
     {
@@ -25,6 +26,7 @@ public sealed record TableStorageOptions(
             connectionString,
             configuration["Storage:TenantTableName"] ?? "AimapTenants",
             configuration["Storage:StrategyPlanTableName"] ?? "AimapStrategyPlans",
-            configuration["Storage:EditorialBacklogTableName"] ?? "AimapEditorialBacklogs");
+            configuration["Storage:EditorialBacklogTableName"] ?? "AimapEditorialBacklogs",
+            configuration["Storage:TallySubmissionReceiptTableName"] ?? "AimapTallySubmissionReceipts");
     }
 }

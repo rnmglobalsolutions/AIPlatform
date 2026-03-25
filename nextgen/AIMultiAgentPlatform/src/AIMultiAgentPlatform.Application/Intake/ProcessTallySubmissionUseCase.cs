@@ -1,11 +1,14 @@
 using System.Text.RegularExpressions;
 using System.Net.Mail;
+using System.Security.Cryptography;
+using System.Text;
 using AIMultiAgentPlatform.Application.Abstractions;
 using AIMultiAgentPlatform.Application.Abstractions.Persistence;
 using AIMultiAgentPlatform.Application.Common;
 using AIMultiAgentPlatform.Contracts.Intake;
 using AIMultiAgentPlatform.Domain.Common;
 using AIMultiAgentPlatform.Domain.Editorial;
+using AIMultiAgentPlatform.Domain.Intake;
 using AIMultiAgentPlatform.Domain.Strategy;
 using AIMultiAgentPlatform.Domain.Tenants;
 
@@ -28,22 +31,22 @@ public sealed class ProcessTallySubmissionUseCase
     };
 
     private readonly ITenantRepository _tenantRepository;
+    private readonly ITallySubmissionReceiptRepository _tallySubmissionReceiptRepository;
     private readonly IStrategyPlanRepository _strategyPlanRepository;
     private readonly IEditorialBacklogRepository _editorialBacklogRepository;
-    private readonly IIdGenerator _idGenerator;
     private readonly IClock _clock;
 
     public ProcessTallySubmissionUseCase(
         ITenantRepository tenantRepository,
+        ITallySubmissionReceiptRepository tallySubmissionReceiptRepository,
         IStrategyPlanRepository strategyPlanRepository,
         IEditorialBacklogRepository editorialBacklogRepository,
-        IIdGenerator idGenerator,
         IClock clock)
     {
         _tenantRepository = tenantRepository;
+        _tallySubmissionReceiptRepository = tallySubmissionReceiptRepository;
         _strategyPlanRepository = strategyPlanRepository;
         _editorialBacklogRepository = editorialBacklogRepository;
-        _idGenerator = idGenerator;
         _clock = clock;
     }
 
@@ -52,6 +55,11 @@ public sealed class ProcessTallySubmissionUseCase
         CancellationToken cancellationToken)
     {
         var request = command.Submission;
+        if (string.IsNullOrWhiteSpace(request.ExternalSubmissionId))
+        {
+            return Result<TallySubmissionResponse>.Failure("intake.external-submission-id.required", "ExternalSubmissionId is required for idempotent webhook processing.");
+        }
+
         if (string.IsNullOrWhiteSpace(request.BusinessName))
         {
             return Result<TallySubmissionResponse>.Failure("intake.business-name.required", "Business name is required.");
@@ -80,6 +88,13 @@ public sealed class ProcessTallySubmissionUseCase
         if (!IsSupportedLanguage(request.ContentLanguage))
         {
             return Result<TallySubmissionResponse>.Failure("intake.language.invalid", "Content language must be English, Spanish, or Bilingual.");
+        }
+
+        var externalSubmissionId = request.ExternalSubmissionId.Trim();
+        var existingReceipt = await _tallySubmissionReceiptRepository.FindByExternalSubmissionIdAsync(externalSubmissionId, cancellationToken);
+        if (existingReceipt is not null)
+        {
+            return Result<TallySubmissionResponse>.Success(ToResponse(existingReceipt));
         }
 
         var platformLinks = ResolveIncomingLinks(request);
@@ -122,11 +137,11 @@ public sealed class ProcessTallySubmissionUseCase
             .Normalize();
 
         var slug = Slugify(profile.BusinessName);
-        var tenantId = new TenantId(_idGenerator.NewId("tenant"));
+        var tenantId = new TenantId(BuildStableId("tenant", externalSubmissionId));
         var tenant = Tenant.Create(tenantId, slug, profile, _clock.UtcNow);
 
         var strategyPlan = new StrategyPlan(
-            _idGenerator.NewId("strategy"),
+            BuildStableId("strategy", externalSubmissionId),
             tenantId,
             $"{profile.BusinessName} should publish daily {profile.ContentLanguage.ToLowerInvariant()} content that supports the goal of {profile.MainGoal.ToLowerInvariant()} and turns audience pain points into authority and lead conversations.",
             BuildPillars(profile),
@@ -136,7 +151,7 @@ public sealed class ProcessTallySubmissionUseCase
 
         var windowDays = Math.Clamp(request.BacklogWindowDays, 7, 28);
         var backlog = new EditorialBacklog(
-            _idGenerator.NewId("backlog"),
+            BuildStableId("backlog", externalSubmissionId),
             tenantId,
             windowDays,
             _clock.UtcNow,
@@ -146,13 +161,25 @@ public sealed class ProcessTallySubmissionUseCase
         await _strategyPlanRepository.SaveAsync(strategyPlan, cancellationToken);
         await _editorialBacklogRepository.SaveAsync(backlog, cancellationToken);
 
-        return Result<TallySubmissionResponse>.Success(
-            new TallySubmissionResponse(
-                tenantId.Value,
-                slug,
-                strategyPlan.StrategyPlanId,
-                backlog.EditorialBacklogId,
-                backlog.Items.Count));
+        var response = new TallySubmissionResponse(
+            tenantId.Value,
+            slug,
+            strategyPlan.StrategyPlanId,
+            backlog.EditorialBacklogId,
+            backlog.Items.Count);
+
+        await _tallySubmissionReceiptRepository.SaveAsync(
+            new TallySubmissionReceipt(
+                externalSubmissionId,
+                response.TenantId,
+                response.Slug,
+                response.StrategyPlanId,
+                response.EditorialBacklogId,
+                response.BacklogItemCount,
+                _clock.UtcNow),
+            cancellationToken);
+
+        return Result<TallySubmissionResponse>.Success(response);
     }
 
     private static IReadOnlyList<string> BuildPillars(ClientProfile profile) =>
@@ -215,6 +242,20 @@ public sealed class ProcessTallySubmissionUseCase
         normalized = Regex.Replace(normalized, @"-+", "-");
         return normalized.Trim('-');
     }
+
+    private static string BuildStableId(string prefix, string seed)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed.Trim().ToLowerInvariant()));
+        return $"{prefix}_{Convert.ToHexString(hash)[..24].ToLowerInvariant()}";
+    }
+
+    private static TallySubmissionResponse ToResponse(TallySubmissionReceipt receipt) =>
+        new(
+            receipt.TenantId,
+            receipt.Slug,
+            receipt.StrategyPlanId,
+            receipt.EditorialBacklogId,
+            receipt.BacklogItemCount);
 
     private static IReadOnlyList<string> ResolveIncomingLinks(TallySubmissionRequest request)
     {

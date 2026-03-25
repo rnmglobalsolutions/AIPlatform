@@ -3,6 +3,7 @@ using AIMultiAgentPlatform.Application.Abstractions.Persistence;
 using AIMultiAgentPlatform.Application.Intake;
 using AIMultiAgentPlatform.Contracts.Intake;
 using AIMultiAgentPlatform.Domain.Editorial;
+using AIMultiAgentPlatform.Domain.Intake;
 using AIMultiAgentPlatform.Domain.Strategy;
 using AIMultiAgentPlatform.Domain.Tenants;
 
@@ -14,13 +15,14 @@ public sealed class ProcessTallySubmissionUseCaseTests
     public async Task ExecuteAsync_CreatesTenantStrategyAndEditorialBacklog()
     {
         var tenantRepository = new FakeTenantRepository();
+        var receiptRepository = new FakeTallySubmissionReceiptRepository();
         var strategyPlanRepository = new FakeStrategyPlanRepository();
         var backlogRepository = new FakeEditorialBacklogRepository();
         var useCase = new ProcessTallySubmissionUseCase(
             tenantRepository,
+            receiptRepository,
             strategyPlanRepository,
             backlogRepository,
-            new DeterministicIdGenerator(),
             new FixedClock());
 
         var request = new TallySubmissionRequest(
@@ -43,16 +45,18 @@ public sealed class ProcessTallySubmissionUseCaseTests
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.Value);
-        Assert.Equal("tenant_001", result.Value!.TenantId);
+        Assert.StartsWith("tenant_", result.Value!.TenantId);
         Assert.Equal("rnm-growth", result.Value.Slug);
-        Assert.Equal("strategy_002", result.Value.StrategyPlanId);
-        Assert.Equal("backlog_003", result.Value.EditorialBacklogId);
+        Assert.StartsWith("strategy_", result.Value.StrategyPlanId);
+        Assert.StartsWith("backlog_", result.Value.EditorialBacklogId);
         Assert.Equal(14, result.Value.BacklogItemCount);
-        Assert.Equal("rnm-growth", tenantRepository.Saved!.Slug);
+        Assert.Equal(result.Value.TenantId, tenantRepository.Saved!.TenantId.Value);
+        Assert.Equal("rnm-growth", tenantRepository.Saved.Slug);
         Assert.Equal(14, backlogRepository.Saved!.Items.Count);
         Assert.Contains(backlogRepository.Saved.Items, item => item.PrimaryFormat == PrimaryFormat.ShortVideo);
         Assert.Equal(1, strategyPlanRepository.Saved!.DailyPostingCadenceDays);
         Assert.Equal(3, strategyPlanRepository.Saved.VideoCadenceDays);
+        Assert.Equal(result.Value.TenantId, receiptRepository.Saved!.TenantId);
     }
 
     [Fact]
@@ -60,9 +64,9 @@ public sealed class ProcessTallySubmissionUseCaseTests
     {
         var useCase = new ProcessTallySubmissionUseCase(
             new FakeTenantRepository(),
+            new FakeTallySubmissionReceiptRepository(),
             new FakeStrategyPlanRepository(),
             new FakeEditorialBacklogRepository(),
-            new DeterministicIdGenerator(),
             new FixedClock());
 
         var request = new TallySubmissionRequest(
@@ -93,9 +97,9 @@ public sealed class ProcessTallySubmissionUseCaseTests
         var tenantRepository = new FakeTenantRepository();
         var useCase = new ProcessTallySubmissionUseCase(
             tenantRepository,
+            new FakeTallySubmissionReceiptRepository(),
             new FakeStrategyPlanRepository(),
             new FakeEditorialBacklogRepository(),
-            new DeterministicIdGenerator(),
             new FixedClock());
 
         var request = new TallySubmissionRequest(
@@ -130,9 +134,9 @@ public sealed class ProcessTallySubmissionUseCaseTests
         var tenantRepository = new FakeTenantRepository();
         var useCase = new ProcessTallySubmissionUseCase(
             tenantRepository,
+            new FakeTallySubmissionReceiptRepository(),
             new FakeStrategyPlanRepository(),
             new FakeEditorialBacklogRepository(),
-            new DeterministicIdGenerator(),
             new FixedClock());
 
         var request = new TallySubmissionRequest(
@@ -176,9 +180,9 @@ public sealed class ProcessTallySubmissionUseCaseTests
     {
         var useCase = new ProcessTallySubmissionUseCase(
             new FakeTenantRepository(),
+            new FakeTallySubmissionReceiptRepository(),
             new FakeStrategyPlanRepository(),
             new FakeEditorialBacklogRepository(),
-            new DeterministicIdGenerator(),
             new FixedClock());
 
         var request = new TallySubmissionRequest(
@@ -195,15 +199,38 @@ public sealed class ProcessTallySubmissionUseCaseTests
         Assert.Equal("intake.language.invalid", result.ErrorCode);
     }
 
-    private sealed class DeterministicIdGenerator : IIdGenerator
+    [Fact]
+    public async Task ExecuteAsync_WhenSubmissionIsRetried_ReturnsExistingResponseWithoutCreatingNewArtifacts()
     {
-        private int _sequence;
+        var tenantRepository = new FakeTenantRepository();
+        var receiptRepository = new FakeTallySubmissionReceiptRepository();
+        var strategyPlanRepository = new FakeStrategyPlanRepository();
+        var backlogRepository = new FakeEditorialBacklogRepository();
+        var useCase = new ProcessTallySubmissionUseCase(
+            tenantRepository,
+            receiptRepository,
+            strategyPlanRepository,
+            backlogRepository,
+            new FixedClock());
 
-        public string NewId(string prefix)
-        {
-            _sequence++;
-            return $"{prefix}_{_sequence:000}";
-        }
+        var request = new TallySubmissionRequest(
+            "sub_retry_001",
+            "RNM Growth",
+            "Jane Doe",
+            "jane@rnm.test",
+            "B2B consultants",
+            Platforms: ["https://www.instagram.com/rnmgrowth"]);
+
+        var first = await useCase.ExecuteAsync(new ProcessTallySubmissionCommand(request), CancellationToken.None);
+        var second = await useCase.ExecuteAsync(new ProcessTallySubmissionCommand(request), CancellationToken.None);
+
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+        Assert.Equal(first.Value, second.Value);
+        Assert.Equal(1, tenantRepository.SaveCount);
+        Assert.Equal(1, strategyPlanRepository.SaveCount);
+        Assert.Equal(1, backlogRepository.SaveCount);
+        Assert.Equal(1, receiptRepository.SaveCount);
     }
 
     private sealed class FixedClock : IClock
@@ -214,9 +241,11 @@ public sealed class ProcessTallySubmissionUseCaseTests
     private sealed class FakeTenantRepository : ITenantRepository
     {
         public Tenant? Saved { get; private set; }
+        public int SaveCount { get; private set; }
 
         public Task SaveAsync(Tenant tenant, CancellationToken cancellationToken)
         {
+            SaveCount++;
             Saved = tenant;
             return Task.CompletedTask;
         }
@@ -228,9 +257,11 @@ public sealed class ProcessTallySubmissionUseCaseTests
     private sealed class FakeStrategyPlanRepository : IStrategyPlanRepository
     {
         public StrategyPlan? Saved { get; private set; }
+        public int SaveCount { get; private set; }
 
         public Task SaveAsync(StrategyPlan strategyPlan, CancellationToken cancellationToken)
         {
+            SaveCount++;
             Saved = strategyPlan;
             return Task.CompletedTask;
         }
@@ -239,14 +270,34 @@ public sealed class ProcessTallySubmissionUseCaseTests
     private sealed class FakeEditorialBacklogRepository : IEditorialBacklogRepository
     {
         public EditorialBacklog? Saved { get; private set; }
+        public int SaveCount { get; private set; }
 
         public Task SaveAsync(EditorialBacklog backlog, CancellationToken cancellationToken)
         {
+            SaveCount++;
             Saved = backlog;
             return Task.CompletedTask;
         }
 
         public Task<EditorialBacklog?> FindByIdAsync(string backlogId, CancellationToken cancellationToken) =>
             Task.FromResult(Saved?.EditorialBacklogId == backlogId ? Saved : null);
+    }
+
+    private sealed class FakeTallySubmissionReceiptRepository : ITallySubmissionReceiptRepository
+    {
+        private readonly Dictionary<string, TallySubmissionReceipt> _items = new(StringComparer.OrdinalIgnoreCase);
+        public TallySubmissionReceipt? Saved { get; private set; }
+        public int SaveCount { get; private set; }
+
+        public Task SaveAsync(TallySubmissionReceipt receipt, CancellationToken cancellationToken)
+        {
+            SaveCount++;
+            Saved = receipt;
+            _items[receipt.ExternalSubmissionId] = receipt;
+            return Task.CompletedTask;
+        }
+
+        public Task<TallySubmissionReceipt?> FindByExternalSubmissionIdAsync(string externalSubmissionId, CancellationToken cancellationToken) =>
+            Task.FromResult(_items.TryGetValue(externalSubmissionId.Trim(), out var receipt) ? receipt : null);
     }
 }
