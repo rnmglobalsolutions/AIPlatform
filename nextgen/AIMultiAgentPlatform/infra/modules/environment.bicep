@@ -113,7 +113,7 @@ module computeModule './compute.bicep' = {
     appInsightsConnectionString: monitoringModule.outputs.applicationInsightsConnectionString
     keyVaultUri: keyVaultModule.outputs.vaultUri
     platformMode: isProduction ? 'Production' : 'Lean'
-    persistenceMode: 'InMemory'
+    persistenceMode: isProduction ? 'InMemory' : 'Table'
     messagingMode: isProduction ? 'ServiceBus' : 'Queue'
     hostingMode: isProduction ? 'Dedicated' : 'FunctionsConsumption'
     targetPersistenceMode: isProduction ? 'Sql' : 'Table'
