@@ -22,6 +22,22 @@ internal static class FunctionHttp
         return await JsonSerializer.DeserializeAsync<T>(request.Body, JsonOptions, cancellationToken);
     }
 
+    public static async Task<string> ReadBodyAsStringAsync(HttpRequestData request, CancellationToken cancellationToken)
+    {
+        if (request.Body is null)
+        {
+            return string.Empty;
+        }
+
+        using var reader = new StreamReader(request.Body, leaveOpen: false);
+        return await reader.ReadToEndAsync(cancellationToken);
+    }
+
+    public static T? DeserializeJson<T>(string payloadJson) =>
+        string.IsNullOrWhiteSpace(payloadJson)
+            ? default
+            : JsonSerializer.Deserialize<T>(payloadJson, JsonOptions);
+
     public static async Task<HttpResponseData> CreatedAsync<T>(HttpRequestData request, T payload, CancellationToken cancellationToken)
     {
         var response = request.CreateResponse(HttpStatusCode.Created);
@@ -42,6 +58,17 @@ internal static class FunctionHttp
             detail = result?.ErrorMessage,
             errorCode = result?.ErrorCode
         }, cancellationToken);
+        return response;
+    }
+
+    public static async Task<HttpResponseData> UnauthorizedAsync(
+        HttpRequestData request,
+        string title,
+        string detail,
+        CancellationToken cancellationToken)
+    {
+        var response = request.CreateResponse(HttpStatusCode.Unauthorized);
+        await WriteJsonAsync(response, new { title, detail }, cancellationToken);
         return response;
     }
 

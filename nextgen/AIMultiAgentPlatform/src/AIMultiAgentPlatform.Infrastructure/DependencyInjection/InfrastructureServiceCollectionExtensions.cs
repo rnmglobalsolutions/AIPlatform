@@ -99,6 +99,8 @@ public static class InfrastructureServiceCollectionExtensions
     {
         services.AddSingleton<InMemoryTenantRepository>();
         services.AddSingleton<ITenantRepository>(sp => sp.GetRequiredService<InMemoryTenantRepository>());
+        services.AddSingleton<InMemoryTallySubmissionReceiptRepository>();
+        services.AddSingleton<ITallySubmissionReceiptRepository>(sp => sp.GetRequiredService<InMemoryTallySubmissionReceiptRepository>());
         services.AddSingleton<InMemoryStrategyPlanRepository>();
         services.AddSingleton<IStrategyPlanRepository>(sp => sp.GetRequiredService<InMemoryStrategyPlanRepository>());
         services.AddSingleton<InMemoryEditorialBacklogRepository>();
@@ -150,6 +152,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton(sp => new TableServiceClient(options.ConnectionString));
         services.AddSingleton<TableStorageTenantRepository>();
         services.AddSingleton<ITenantRepository>(sp => sp.GetRequiredService<TableStorageTenantRepository>());
+        services.AddSingleton<TableStorageTallySubmissionReceiptRepository>();
+        services.AddSingleton<ITallySubmissionReceiptRepository>(sp => sp.GetRequiredService<TableStorageTallySubmissionReceiptRepository>());
 
         services.AddSingleton<TableStorageStrategyPlanRepository>();
         services.AddSingleton<IStrategyPlanRepository>(sp => sp.GetRequiredService<TableStorageStrategyPlanRepository>());
@@ -168,6 +172,8 @@ public static class InfrastructureServiceCollectionExtensions
         {
             services.AddSingleton<InMemoryTenantRepository>();
             services.AddSingleton<ITenantRepository>(sp => sp.GetRequiredService<InMemoryTenantRepository>());
+            services.AddSingleton<InMemoryTallySubmissionReceiptRepository>();
+            services.AddSingleton<ITallySubmissionReceiptRepository>(sp => sp.GetRequiredService<InMemoryTallySubmissionReceiptRepository>());
             services.AddSingleton<InMemoryStrategyPlanRepository>();
             services.AddSingleton<IStrategyPlanRepository>(sp => sp.GetRequiredService<InMemoryStrategyPlanRepository>());
             services.AddSingleton<InMemoryEditorialBacklogRepository>();
