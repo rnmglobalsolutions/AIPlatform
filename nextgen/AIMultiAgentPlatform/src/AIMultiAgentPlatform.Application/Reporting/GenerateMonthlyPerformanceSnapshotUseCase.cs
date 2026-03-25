@@ -75,14 +75,25 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCase
         var appointmentsBooked = source.BookingRecords.Count(item => item.Status == Domain.Booking.BookingStatus.Booked);
         var reminderTouchesScheduled = source.ReminderSchedules.Sum(item => item.Touches.Count);
         var followUpTouchesScheduled = source.FollowUpSequences.Sum(item => item.Steps.Count);
+        var bookingFocused = IsBookingFocused(tenant.Profile.DesiredAction);
+        var bilingual = string.Equals(tenant.Profile.ContentLanguage, "Bilingual", StringComparison.OrdinalIgnoreCase);
 
-        var estimatedEngagement = Math.Round((averageQualityScore * Math.Max(postsPublished, 1)) + (marketingQualifiedLeads * 3.5), 2);
-        var estimatedClicks = Math.Round((appointmentsBooked * 4.0) + (marketingQualifiedLeads * 1.25), 2);
+        var estimatedEngagement = Math.Round(
+            (averageQualityScore * Math.Max(postsPublished, 1)) +
+            (marketingQualifiedLeads * 3.5) +
+            (bilingual ? 2.0 : 0),
+            2);
+        var estimatedClicks = Math.Round(
+            (appointmentsBooked * (bookingFocused ? 5.25 : 4.0)) +
+            (marketingQualifiedLeads * (bookingFocused ? 1.75 : 1.25)),
+            2);
 
         var snapshot = new MonthlyPerformanceSnapshot(
             _idGenerator.NewId("monthly_snapshot"),
             tenant.TenantId,
             monthKey,
+            tenant.Profile.ContentLanguage,
+            tenant.Profile.DesiredAction,
             postsPublished,
             videosCreated,
             graphicsCreated,
@@ -106,6 +117,8 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCase
             new GenerateMonthlyPerformanceSnapshotResponse(
                 snapshot.MonthlyPerformanceSnapshotId,
                 snapshot.MonthKey,
+                snapshot.ContentLanguage,
+                snapshot.PrimaryConversionAction,
                 snapshot.PostsPublished,
                 snapshot.VideosCreated,
                 snapshot.GraphicsCreated,
@@ -138,4 +151,11 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCase
             .Select(asset => asset.Headline)
             .First();
     }
+
+    private static bool IsBookingFocused(string? desiredAction) =>
+        !string.IsNullOrWhiteSpace(desiredAction) &&
+        (desiredAction.Contains("book", StringComparison.OrdinalIgnoreCase) ||
+         desiredAction.Contains("consult", StringComparison.OrdinalIgnoreCase) ||
+         desiredAction.Contains("appointment", StringComparison.OrdinalIgnoreCase) ||
+         desiredAction.Contains("call", StringComparison.OrdinalIgnoreCase));
 }

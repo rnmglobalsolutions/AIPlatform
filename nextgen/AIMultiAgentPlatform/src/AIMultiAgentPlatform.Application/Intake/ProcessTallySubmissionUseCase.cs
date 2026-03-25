@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Net.Mail;
 using AIMultiAgentPlatform.Application.Abstractions;
 using AIMultiAgentPlatform.Application.Abstractions.Persistence;
 using AIMultiAgentPlatform.Application.Common;
@@ -56,19 +57,68 @@ public sealed class ProcessTallySubmissionUseCase
             return Result<TallySubmissionResponse>.Failure("intake.business-name.required", "Business name is required.");
         }
 
+        if (string.IsNullOrWhiteSpace(request.PrimaryContactName))
+        {
+            return Result<TallySubmissionResponse>.Failure("intake.contact-name.required", "Primary contact name is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.PrimaryContactEmail))
+        {
+            return Result<TallySubmissionResponse>.Failure("intake.contact-email.required", "Primary contact email is required.");
+        }
+
+        if (!IsValidEmail(request.PrimaryContactEmail))
+        {
+            return Result<TallySubmissionResponse>.Failure("intake.contact-email.invalid", "Primary contact email is invalid.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Niche))
+        {
+            return Result<TallySubmissionResponse>.Failure("intake.niche.required", "Niche is required.");
+        }
+
+        if (!IsSupportedLanguage(request.ContentLanguage))
+        {
+            return Result<TallySubmissionResponse>.Failure("intake.language.invalid", "Content language must be English, Spanish, or Bilingual.");
+        }
+
+        var platformLinks = ResolveIncomingLinks(request);
+        var invalidLink = platformLinks.FirstOrDefault(link => !IsValidPlatformOrUrl(link));
+        if (!string.IsNullOrWhiteSpace(invalidLink))
+        {
+            return Result<TallySubmissionResponse>.Failure("intake.platform-url.invalid", $"Platform or booking entry is invalid: {invalidLink}");
+        }
+
+        var publishingPlatforms = ResolvePublishingPlatforms(platformLinks);
+        var calendlyUrl = ResolveCalendlyUrl(request, platformLinks);
+        var offer = FirstNonEmpty(request.MainOffer, request.Offer);
+        var targetAudience = FirstNonEmpty(request.IdealClientDescription, request.TargetAudience);
+        var desiredAction = request.DesiredAction;
+        var brandTone = FirstNonEmpty(request.BrandTonePreference, request.BrandTone);
+        var painPoints = ResolveList(request.PainPoints, request.PainPointsText);
+        var objections = ResolveList(request.Objections, request.ObjectionsText);
+        var avoidTopics = ResolveList(request.AvoidTopics, request.AvoidTopicsText);
+        var callToActionKeyword = ResolveCallToActionKeyword(request.CallToActionKeyword, desiredAction, request.MainGoal);
+
         var profile = new ClientProfile(
                 request.BusinessName,
                 request.PrimaryContactName,
                 request.PrimaryContactEmail,
                 request.Niche,
-                request.Offer,
-                request.TargetAudience,
-                request.BrandTone,
-                request.CallToActionKeyword,
-                request.Platforms,
-                request.PainPoints,
-                request.Objections,
-                request.AvoidTopics)
+                offer,
+                targetAudience,
+                brandTone,
+                callToActionKeyword,
+                publishingPlatforms,
+                painPoints,
+                objections,
+                avoidTopics,
+                request.PrimaryContactPhone,
+                platformLinks,
+                calendlyUrl,
+                request.MainGoal,
+                desiredAction,
+                request.ContentLanguage)
             .Normalize();
 
         var slug = Slugify(profile.BusinessName);
@@ -78,7 +128,7 @@ public sealed class ProcessTallySubmissionUseCase
         var strategyPlan = new StrategyPlan(
             _idGenerator.NewId("strategy"),
             tenantId,
-            $"{profile.BusinessName} should publish daily educational content that turns audience pain points into authority and lead conversations.",
+            $"{profile.BusinessName} should publish daily {profile.ContentLanguage.ToLowerInvariant()} content that supports the goal of {profile.MainGoal.ToLowerInvariant()} and turns audience pain points into authority and lead conversations.",
             BuildPillars(profile),
             1,
             3,
@@ -110,7 +160,8 @@ public sealed class ProcessTallySubmissionUseCase
         $"{profile.Niche} authority",
         "Pain point education",
         "Objection handling",
-        $"Lead generation around {profile.Offer}"
+        $"Lead generation around {profile.Offer}",
+        $"Goal support: {profile.MainGoal}"
     ];
 
     private static IReadOnlyList<EditorialBacklogItem> BuildBacklog(ClientProfile profile, int windowDays)
@@ -163,5 +214,178 @@ public sealed class ProcessTallySubmissionUseCase
         normalized = Regex.Replace(normalized, @"[^a-z0-9]+", "-");
         normalized = Regex.Replace(normalized, @"-+", "-");
         return normalized.Trim('-');
+    }
+
+    private static IReadOnlyList<string> ResolveIncomingLinks(TallySubmissionRequest request)
+    {
+        var links = new List<string>();
+
+        AddIfPresent(links, request.InstagramUrl);
+        AddIfPresent(links, request.FacebookPageUrl);
+        AddIfPresent(links, request.TikTokUrl);
+        AddIfPresent(links, request.LinkedInUrl);
+        AddIfPresent(links, request.YouTubeShortsUrl);
+        AddIfPresent(links, request.CalendlyUrl);
+
+        if (request.Platforms is not null)
+        {
+            foreach (var platform in request.Platforms)
+            {
+                AddIfPresent(links, platform);
+            }
+        }
+
+        return links
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> ResolvePublishingPlatforms(IReadOnlyList<string> links)
+    {
+        var resolved = new List<string>();
+
+        foreach (var link in links)
+        {
+            var normalized = link.Trim().ToLowerInvariant();
+
+            if (normalized.Contains("instagram", StringComparison.Ordinal))
+            {
+                resolved.Add("Instagram");
+            }
+            else if (normalized.Contains("facebook", StringComparison.Ordinal))
+            {
+                resolved.Add("Facebook");
+            }
+            else if (normalized.Contains("linkedin", StringComparison.Ordinal))
+            {
+                resolved.Add("LinkedIn");
+            }
+            else if (normalized.Contains("tiktok", StringComparison.Ordinal))
+            {
+                resolved.Add("TikTok");
+            }
+            else if (normalized.Contains("youtube", StringComparison.Ordinal))
+            {
+                resolved.Add("YouTube");
+            }
+            else if (normalized.Equals("instagram", StringComparison.Ordinal) ||
+                     normalized.Equals("facebook", StringComparison.Ordinal) ||
+                     normalized.Equals("linkedin", StringComparison.Ordinal) ||
+                     normalized.Equals("tiktok", StringComparison.Ordinal) ||
+                     normalized.Equals("youtube", StringComparison.Ordinal))
+            {
+                resolved.Add(link.Trim());
+            }
+            else if (!normalized.Contains("calendly", StringComparison.Ordinal) &&
+                     !normalized.Contains("calendar.google", StringComparison.Ordinal))
+            {
+                resolved.Add(link);
+            }
+        }
+
+        return resolved
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string ResolveCalendlyUrl(TallySubmissionRequest request, IReadOnlyList<string> links) =>
+        FirstNonEmpty(
+            request.CalendlyUrl,
+            links.FirstOrDefault(link =>
+                link.Contains("calendly", StringComparison.OrdinalIgnoreCase) ||
+                link.Contains("calendar.google", StringComparison.OrdinalIgnoreCase)));
+
+    private static IReadOnlyList<string> ResolveList(IReadOnlyList<string>? structuredValues, string? freeformValue)
+    {
+        var structured = structuredValues?
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (structured is { Length: > 0 })
+        {
+            return structured;
+        }
+
+        return (freeformValue ?? string.Empty)
+            .Split(['\n', '\r', ',', ';', '|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(item => item.TrimStart('-', '•', '*').Trim())
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string ResolveCallToActionKeyword(string? explicitKeyword, string? desiredAction, string? mainGoal)
+    {
+        var provided = FirstNonEmpty(explicitKeyword);
+        if (!string.IsNullOrWhiteSpace(provided))
+        {
+            return provided!;
+        }
+
+        var corpus = $"{desiredAction} {mainGoal}".ToLowerInvariant();
+
+        if (corpus.Contains("book", StringComparison.Ordinal) || corpus.Contains("call", StringComparison.Ordinal) || corpus.Contains("appointment", StringComparison.Ordinal))
+        {
+            return "BOOK";
+        }
+
+        if (corpus.Contains("quote", StringComparison.Ordinal) || corpus.Contains("estimate", StringComparison.Ordinal))
+        {
+            return "QUOTE";
+        }
+
+        if (corpus.Contains("message", StringComparison.Ordinal) || corpus.Contains("dm", StringComparison.Ordinal))
+        {
+            return "DM";
+        }
+
+        return "BOOK";
+    }
+
+    private static bool IsValidEmail(string value)
+    {
+        try
+        {
+            _ = new MailAddress(value.Trim());
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsValidHttpUrl(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static bool IsValidPlatformOrUrl(string value)
+    {
+        if (IsValidHttpUrl(value))
+        {
+            return true;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized is "instagram" or "facebook" or "linkedin" or "tiktok" or "youtube";
+    }
+
+    private static bool IsSupportedLanguage(string? value) =>
+        string.IsNullOrWhiteSpace(value) ||
+        value.Equals("English", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("Spanish", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("Bilingual", StringComparison.OrdinalIgnoreCase);
+
+    private static string FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+
+    private static void AddIfPresent(ICollection<string> target, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            target.Add(value.Trim());
+        }
     }
 }

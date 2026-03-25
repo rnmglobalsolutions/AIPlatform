@@ -79,7 +79,50 @@ public sealed class ProcessManyChatEventUseCaseTests
         Assert.Equal("booking", result.Value.FieldsToUpsert["last_intent"]);
     }
 
-    private static Tenant CreateTenant() =>
+    [Fact]
+    public async Task ExecuteAsync_WhenTenantCtaLeadsToBooking_UsesBookingHandoffFlow()
+    {
+        var tenant = CreateTenant(
+            calendlyUrl: "https://calendly.com/rnm-growth/consultation",
+            desiredAction: "Book a consultation from the content",
+            contentLanguage: "Bilingual");
+        var leadRepository = new FakeLeadProfileRepository();
+        var stateRepository = new FakeManyChatContactStateRepository();
+        var useCase = new ProcessManyChatEventUseCase(
+            new FakeTenantRepository(tenant),
+            leadRepository,
+            stateRepository,
+            new DeterministicIdGenerator(),
+            new FixedClock());
+
+        var result = await useCase.ExecuteAsync(
+            new ProcessManyChatEventCommand(
+                new ProcessManyChatEventRequest(
+                    tenant.TenantId.Value,
+                    "contact_003",
+                    "message_received",
+                    "instagram",
+                    "Can you send me BOOK?",
+                    "Maria",
+                    "Lopez",
+                    "maria@rnm.test")),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("MarketingQualified", result.Value!.LeadLifecycleStage);
+        Assert.Equal("leadgen-keyword-booking-handoff", result.Value.TriggeredFlow);
+        Assert.Contains("booking-link-ready", result.Value.TagsToAdd);
+        Assert.Equal("Book a consultation from the content", result.Value.FieldsToUpsert["desired_action"]);
+        Assert.Equal("Bilingual", result.Value.FieldsToUpsert["content_language"]);
+        Assert.Equal("https://calendly.com/rnm-growth/consultation", result.Value.FieldsToUpsert["calendly_url"]);
+        Assert.Contains("booking handoff", leadRepository.Saved!.IntentSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("leadgen-keyword-booking-handoff", stateRepository.Saved!.TriggeredFlow);
+    }
+
+    private static Tenant CreateTenant(
+        string calendlyUrl = "",
+        string desiredAction = "",
+        string contentLanguage = "English") =>
         Tenant.Create(
             new TenantId("tenant_001"),
             "rnm-growth",
@@ -95,7 +138,10 @@ public sealed class ProcessManyChatEventUseCaseTests
                 ["Instagram", "Messenger"],
                 ["Low engagement"],
                 ["No time"],
-                ["Politics"]),
+                ["Politics"],
+                CalendlyUrl: calendlyUrl,
+                DesiredAction: desiredAction,
+                ContentLanguage: contentLanguage),
             new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc));
 
     private sealed class DeterministicIdGenerator : IIdGenerator

@@ -37,7 +37,10 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCaseTests
                 ["Instagram", "LinkedIn"],
                 ["Low engagement"],
                 ["No time"],
-                ["Politics"]),
+                ["Politics"],
+                CalendlyUrl: "https://calendly.com/rnm-growth/consultation",
+                DesiredAction: "Book a consultation from the content",
+                ContentLanguage: "Bilingual"),
             new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc));
 
         var source = new MonthlyPerformanceSource(
@@ -67,12 +70,16 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCaseTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal("monthly_snapshot_001", result.Value!.MonthlyPerformanceSnapshotId);
+        Assert.Equal("Bilingual", result.Value.ContentLanguage);
+        Assert.Equal("Book a consultation from the content", result.Value.PrimaryConversionAction);
         Assert.Equal(2, result.Value.PostsPublished);
         Assert.Equal(1, result.Value.VideosCreated);
         Assert.Equal(0, result.Value.GraphicsCreated);
         Assert.Equal("Short video: Authority", result.Value.TopPerformingAssetTitle);
         Assert.Equal(8.7, result.Value.AverageQualityScore);
         Assert.Equal(1, result.Value.AppointmentsBooked);
+        Assert.Equal("Bilingual", snapshotRepository.Saved!.ContentLanguage);
+        Assert.Equal("Book a consultation from the content", snapshotRepository.Saved.PrimaryConversionAction);
         Assert.NotNull(snapshotRepository.Saved);
     }
 

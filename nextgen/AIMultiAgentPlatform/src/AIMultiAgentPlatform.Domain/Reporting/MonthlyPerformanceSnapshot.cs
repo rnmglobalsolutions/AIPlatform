@@ -6,6 +6,8 @@ public sealed record MonthlyPerformanceSnapshot(
     string MonthlyPerformanceSnapshotId,
     TenantId TenantId,
     string MonthKey,
+    string ContentLanguage,
+    string PrimaryConversionAction,
     int PostsPublished,
     int VideosCreated,
     int GraphicsCreated,

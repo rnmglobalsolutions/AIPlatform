@@ -101,7 +101,7 @@ public sealed class OrchestrateVoiceAgentUseCase
             $"{lead.FirstName} {lead.LastName}".Trim(),
             request.PhoneNumber.Trim(),
             objective,
-            BuildPromptSummary(tenant.Profile.CallToActionKeyword, lead, objective),
+            BuildPromptSummary(tenant.Profile, lead, objective),
             request.PreferredVoiceId);
 
         var providerResult = await _voiceConversationProvider.ExecuteAsync(providerRequest, cancellationToken);
@@ -145,6 +145,8 @@ public sealed class OrchestrateVoiceAgentUseCase
                 {
                     ["voice_last_objective"] = objective.ToString(),
                     ["voice_last_disposition"] = providerResult.Disposition.ToString(),
+                    ["desired_action"] = tenant.Profile.DesiredAction,
+                    ["content_language"] = tenant.Profile.ContentLanguage,
                     ["lead_stage"] = finalStage.ToString()
                 };
                 break;
@@ -160,7 +162,7 @@ public sealed class OrchestrateVoiceAgentUseCase
                         lead.LeadProfileId,
                         lead.ManyChatContactId,
                         BookingStatus.Booked,
-                        BuildVoiceReferenceUrl(providerResult.ExternalCallId),
+                        ResolveBookingReferenceUrl(tenant.Profile, providerResult.ExternalCallId),
                         "voice-booking",
                         providerResult.AppointmentUtc ?? now.AddDays(2),
                         now);
@@ -171,6 +173,9 @@ public sealed class OrchestrateVoiceAgentUseCase
                         ["voice_last_objective"] = objective.ToString(),
                         ["voice_last_disposition"] = providerResult.Disposition.ToString(),
                         ["booking_status"] = bookingRecord.Status.ToString(),
+                        ["desired_action"] = tenant.Profile.DesiredAction,
+                        ["content_language"] = tenant.Profile.ContentLanguage,
+                        ["calendly_url"] = bookingRecord.CalendlyUrl,
                         ["appointment_utc"] = bookingRecord.AppointmentUtc?.ToString("O") ?? string.Empty,
                         ["lead_stage"] = finalStage.ToString()
                     };
@@ -185,7 +190,7 @@ public sealed class OrchestrateVoiceAgentUseCase
                         lead.LeadProfileId,
                         lead.ManyChatContactId,
                         BookingStatus.Requested,
-                        BuildVoiceReferenceUrl(providerResult.ExternalCallId),
+                        ResolveBookingReferenceUrl(tenant.Profile, providerResult.ExternalCallId),
                         "voice-booking",
                         null,
                         now);
@@ -196,6 +201,9 @@ public sealed class OrchestrateVoiceAgentUseCase
                         ["voice_last_objective"] = objective.ToString(),
                         ["voice_last_disposition"] = providerResult.Disposition.ToString(),
                         ["booking_status"] = bookingRecord.Status.ToString(),
+                        ["desired_action"] = tenant.Profile.DesiredAction,
+                        ["content_language"] = tenant.Profile.ContentLanguage,
+                        ["calendly_url"] = bookingRecord.CalendlyUrl,
                         ["lead_stage"] = finalStage.ToString()
                     };
                 }
@@ -211,6 +219,8 @@ public sealed class OrchestrateVoiceAgentUseCase
                 {
                     ["voice_last_objective"] = objective.ToString(),
                     ["voice_last_disposition"] = providerResult.Disposition.ToString(),
+                    ["desired_action"] = tenant.Profile.DesiredAction,
+                    ["content_language"] = tenant.Profile.ContentLanguage,
                     ["last_reminder_channel"] = CommunicationChannel.Voice.ToString(),
                     ["lead_stage"] = finalStage.ToString()
                 };
@@ -226,6 +236,8 @@ public sealed class OrchestrateVoiceAgentUseCase
                 {
                     ["voice_last_objective"] = objective.ToString(),
                     ["voice_last_disposition"] = providerResult.Disposition.ToString(),
+                    ["desired_action"] = tenant.Profile.DesiredAction,
+                    ["content_language"] = tenant.Profile.ContentLanguage,
                     ["last_follow_up_channel"] = CommunicationChannel.Voice.ToString(),
                     ["lead_stage"] = finalStage.ToString()
                 };
@@ -331,15 +343,23 @@ public sealed class OrchestrateVoiceAgentUseCase
     private static LeadLifecycleStage MaxStage(LeadLifecycleStage current, LeadLifecycleStage candidate) =>
         (LeadLifecycleStage)Math.Max((int)current, (int)candidate);
 
-    private static string BuildPromptSummary(string ctaKeyword, LeadProfile lead, VoiceCallObjective objective) => objective switch
+    private static string BuildPromptSummary(Domain.Tenants.ClientProfile profile, LeadProfile lead, VoiceCallObjective objective) => objective switch
     {
-        VoiceCallObjective.Qualification => $"Qualify the lead, understand intent, and tie the conversation back to CTA keyword '{ctaKeyword}'.",
-        VoiceCallObjective.Booking => $"Help the lead book the next appointment after confirming fit. Current lead stage: {lead.CurrentStage}.",
-        VoiceCallObjective.Reminder => "Deliver the appointment reminder and confirm attendance.",
-        _ => "Re-engage the lead, resolve objections, and move them toward the next best step."
+        VoiceCallObjective.Qualification => $"Qualify the lead, understand intent, and tie the conversation back to CTA keyword '{profile.CallToActionKeyword}'. Use a {profile.BrandTone.ToLowerInvariant()} tone and speak in {profile.ContentLanguage.ToLowerInvariant()}.",
+        VoiceCallObjective.Booking => $"Help the lead book the next appointment after confirming fit. Current lead stage: {lead.CurrentStage}. The desired action is '{profile.DesiredAction}'. Use {ResolvePromptCalendlyReference(profile)} when a booking link is needed and speak in a {profile.BrandTone.ToLowerInvariant()} {profile.ContentLanguage.ToLowerInvariant()} style.",
+        VoiceCallObjective.Reminder => $"Deliver the appointment reminder, confirm attendance, and keep the delivery {profile.BrandTone.ToLowerInvariant()} and {profile.ContentLanguage.ToLowerInvariant()}.",
+        _ => $"Re-engage the lead, resolve objections, and move them toward '{profile.DesiredAction}' while using a {profile.BrandTone.ToLowerInvariant()} {profile.ContentLanguage.ToLowerInvariant()} tone."
     };
 
     private static string BuildVoiceReferenceUrl(string externalCallId) => $"https://voice-agent.local/calls/{externalCallId}";
+
+    private static string ResolveBookingReferenceUrl(Domain.Tenants.ClientProfile profile, string externalCallId) =>
+        string.IsNullOrWhiteSpace(profile.CalendlyUrl)
+            ? BuildVoiceReferenceUrl(externalCallId)
+            : profile.CalendlyUrl;
+
+    private static string ResolvePromptCalendlyReference(Domain.Tenants.ClientProfile profile) =>
+        string.IsNullOrWhiteSpace(profile.CalendlyUrl) ? "the configured booking link" : profile.CalendlyUrl;
 
     private static IReadOnlyList<string> MergeTags(IReadOnlyList<string>? existing, IReadOnlyList<string> add) =>
         (existing ?? Array.Empty<string>())

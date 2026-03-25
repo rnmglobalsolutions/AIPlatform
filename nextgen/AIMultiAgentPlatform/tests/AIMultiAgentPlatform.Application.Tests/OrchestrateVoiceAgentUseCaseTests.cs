@@ -121,7 +121,64 @@ public sealed class OrchestrateVoiceAgentUseCaseTests
         Assert.Equal("voice-follow-up-complete", stateRepository.Saved!.TriggeredFlow);
     }
 
-    private static Tenant CreateTenant() =>
+    [Fact]
+    public async Task ExecuteAsync_WhenTenantHasCalendlyAndBilingualBookingGoal_UsesThatContextInVoiceFlow()
+    {
+        var tenant = CreateTenant(
+            calendlyUrl: "https://calendly.com/rnm-growth/consultation",
+            desiredAction: "Book a consultation from the content",
+            contentLanguage: "Bilingual",
+            brandTone: "Professional");
+        var lead = CreateLead(tenant.TenantId, "contact_003", LeadLifecycleStage.BookingReady);
+        var state = CreateState(tenant.TenantId, "contact_003");
+        var voiceProvider = new FakeVoiceConversationProvider(
+            new VoiceConversationResult(
+                "ext-call-003",
+                VoiceCallStatus.Completed,
+                CallDisposition.NoAnswer,
+                "No answer on the bilingual booking call.",
+                "Voice booking handoff still needs completion.",
+                new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 03, 23, 12, 2, 0, DateTimeKind.Utc)));
+
+        var useCase = CreateUseCase(
+            tenant,
+            lead,
+            state,
+            voiceProvider,
+            out var bookingRepository,
+            out _,
+            out _,
+            out _,
+            out var stateRepository,
+            out _);
+
+        var result = await useCase.ExecuteAsync(
+            new OrchestrateVoiceAgentCommand(
+                new OrchestrateVoiceAgentRequest(
+                    tenant.TenantId.Value,
+                    "contact_003",
+                    "Booking",
+                    "+12145550102"),
+                "corr-voice-bilingual"),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains("https://calendly.com/rnm-growth/consultation", voiceProvider.LastRequest!.PromptSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bilingual", voiceProvider.LastRequest.PromptSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("professional", voiceProvider.LastRequest.PromptSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("https://calendly.com/rnm-growth/consultation", bookingRepository.Saved!.CalendlyUrl);
+        Assert.Equal("Book a consultation from the content", result.Value!.FieldsToUpsert["desired_action"]);
+        Assert.Equal("Bilingual", result.Value.FieldsToUpsert["content_language"]);
+        Assert.Equal("https://calendly.com/rnm-growth/consultation", result.Value.FieldsToUpsert["calendly_url"]);
+        Assert.Equal("voice-booking-handoff", stateRepository.Saved!.TriggeredFlow);
+    }
+
+    private static Tenant CreateTenant(
+        string calendlyUrl = "",
+        string desiredAction = "",
+        string contentLanguage = "English",
+        string brandTone = "Bold") =>
         Tenant.Create(
             new TenantId("tenant_001"),
             "rnm-growth",
@@ -132,12 +189,15 @@ public sealed class OrchestrateVoiceAgentUseCaseTests
                 "Agencies",
                 "AI content systems",
                 "Founders",
-                "Bold",
+                brandTone,
                 "BOOK",
                 ["Instagram", "Messenger"],
                 ["Low engagement"],
                 ["No time"],
-                ["Politics"]),
+                ["Politics"],
+                CalendlyUrl: calendlyUrl,
+                DesiredAction: desiredAction,
+                ContentLanguage: contentLanguage),
             new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc));
 
     private static LeadProfile CreateLead(TenantId tenantId, string contactId, LeadLifecycleStage stage) =>
@@ -305,7 +365,15 @@ public sealed class OrchestrateVoiceAgentUseCaseTests
 
     private sealed class FakeVoiceConversationProvider(VoiceConversationResult result) : IVoiceConversationProvider
     {
+        public VoiceConversationRequest? LastRequest { get; private set; }
+
         public Task<VoiceConversationResult> ExecuteAsync(VoiceConversationRequest request, CancellationToken cancellationToken) =>
-            Task.FromResult(result);
+            Task.FromResult(Capture(request));
+
+        private VoiceConversationResult Capture(VoiceConversationRequest request)
+        {
+            LastRequest = request;
+            return result;
+        }
     }
 }
