@@ -198,7 +198,7 @@ resource leanFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (isLean) {
       }
       runtime: {
         name: 'dotnet-isolated'
-        version: '10'
+        version: '10.0'
       }
       scaleAndConcurrency: {
         instanceMemoryMB: 2048
