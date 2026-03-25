@@ -245,10 +245,6 @@ resource leanFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (isLean) {
           value: '~4'
         }
         {
-          name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: 'dotnet-isolated'
-        }
-        {
           name: 'AzureWebJobsStorage'
           value: storageConnectionString
         }
