@@ -6,10 +6,6 @@ using Microsoft.Extensions.Hosting;
 var builder = FunctionsApplication.CreateBuilder(args);
 
 builder.Services.AddApplication();
-builder.Services.AddInfrastructure(
-    builder.Configuration["PlatformMode"],
-    builder.Configuration["Infrastructure:PersistenceMode"],
-    builder.Configuration["Infrastructure:MessagingMode"],
-    builder.Configuration["Infrastructure:HostingMode"]);
+builder.Services.AddInfrastructure(builder.Configuration);
 
 builder.Build().Run();
