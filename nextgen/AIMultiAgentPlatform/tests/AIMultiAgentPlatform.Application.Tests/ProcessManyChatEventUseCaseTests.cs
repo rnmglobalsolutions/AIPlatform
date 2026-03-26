@@ -119,10 +119,39 @@ public sealed class ProcessManyChatEventUseCaseTests
         Assert.Equal("leadgen-keyword-booking-handoff", stateRepository.Saved!.TriggeredFlow);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_IncludesWebsiteUrlWhenTenantHasWebsite()
+    {
+        var tenant = CreateTenant(websiteUrl: "https://rnmgrowth.com");
+        var useCase = new ProcessManyChatEventUseCase(
+            new FakeTenantRepository(tenant),
+            new FakeLeadProfileRepository(),
+            new FakeManyChatContactStateRepository(),
+            new DeterministicIdGenerator(),
+            new FixedClock());
+
+        var result = await useCase.ExecuteAsync(
+            new ProcessManyChatEventCommand(
+                new ProcessManyChatEventRequest(
+                    tenant.TenantId.Value,
+                    "contact_004",
+                    "message_received",
+                    "instagram",
+                    "Tell me more",
+                    "Jane",
+                    "Doe",
+                    "jane@rnm.test")),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("https://rnmgrowth.com", result.Value!.FieldsToUpsert["website_url"]);
+    }
+
     private static Tenant CreateTenant(
         string calendlyUrl = "",
         string desiredAction = "",
-        string contentLanguage = "English") =>
+        string contentLanguage = "English",
+        string websiteUrl = "") =>
         Tenant.Create(
             new TenantId("tenant_001"),
             "rnm-growth",
@@ -140,6 +169,7 @@ public sealed class ProcessManyChatEventUseCaseTests
                 ["No time"],
                 ["Politics"],
                 CalendlyUrl: calendlyUrl,
+                WebsiteUrl: websiteUrl,
                 DesiredAction: desiredAction,
                 ContentLanguage: contentLanguage),
             new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc));

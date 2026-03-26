@@ -28,6 +28,7 @@ public sealed record TallySubmissionRequest(
     string LinkedInUrl = "",
     string YouTubeShortsUrl = "",
     string CalendlyUrl = "",
+    string WebsiteUrl = "",
     string PainPointsText = "",
     string ObjectionsText = "",
     string AvoidTopicsText = "");

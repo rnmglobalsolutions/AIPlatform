@@ -183,6 +183,62 @@ public sealed class GenerateDailyContentPackageUseCaseTests
         Assert.Contains("Book via https://calendly.com/acme-tax/consultation", bundleRepository.Saved!.CarouselOutline, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_WhenDesiredActionIsWebsiteVisit_UsesWebsiteInCallToAction()
+    {
+        var tenant = Tenant.Create(
+            new TenantId("tenant_003"),
+            "rnm-growth",
+            new ClientProfile(
+                "RNM Growth",
+                "Jane Doe",
+                "jane@rnm.test",
+                "B2B consultants",
+                "Strategy retainers",
+                "Founders",
+                "Professional",
+                "BOOK",
+                ["Instagram"],
+                ["Low visibility"],
+                ["No time"],
+                [],
+                WebsiteUrl: "https://rnmgrowth.com",
+                DesiredAction: "Visit the website to learn more"),
+            DateTime.UtcNow);
+
+        var backlog = new EditorialBacklog(
+            "backlog_003",
+            tenant.TenantId,
+            14,
+            DateTime.UtcNow,
+            [new EditorialBacklogItem(1, 0, ContentCategory.Authority, PrimaryFormat.BrandedGraphic, "Content strategy", "Show the smarter growth path", "Lead with the hidden cost of waiting", "comments_or_dms", true)]);
+
+        var primaryAssetRepository = new FakePrimaryAssetRepository();
+        var captionAssetRepository = new FakeCaptionAssetRepository();
+        var bundleRepository = new FakeRepurposedAssetBundleRepository();
+
+        var useCase = new GenerateDailyContentPackageUseCase(
+            new FakeTenantRepository(tenant),
+            new FakeEditorialBacklogRepository(backlog),
+            new FakeDailyContentRequestRepository(),
+            new FakeDailyContentBriefRepository(),
+            primaryAssetRepository,
+            captionAssetRepository,
+            bundleRepository,
+            new DeterministicIdGenerator(),
+            new FixedClock());
+
+        var result = await useCase.ExecuteAsync(
+            new GenerateDailyContentPackageCommand(
+                new GenerateDailyContentPackageRequest(tenant.TenantId.Value, backlog.EditorialBacklogId, 1)),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains("https://rnmgrowth.com", primaryAssetRepository.Saved!.CallToAction, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("https://rnmgrowth.com", captionAssetRepository.Saved!.Caption, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Visit https://rnmgrowth.com", bundleRepository.Saved!.CarouselOutline, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class DeterministicIdGenerator : IIdGenerator
     {
         private int _sequence;

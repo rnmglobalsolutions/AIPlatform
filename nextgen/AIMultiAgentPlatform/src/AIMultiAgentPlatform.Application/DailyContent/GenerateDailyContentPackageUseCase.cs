@@ -259,6 +259,11 @@ public sealed class GenerateDailyContentPackageUseCase
             return $"Invite the audience to book directly through {profile.CalendlyUrl} or DM '{callToActionKeyword}' if they want help first.";
         }
 
+        if (RequiresWebsiteCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.WebsiteUrl))
+        {
+            return $"Invite the audience to visit {profile.WebsiteUrl} and mention '{callToActionKeyword}' if they want guidance before taking the next step.";
+        }
+
         if (ContainsAny(profile.DesiredAction, "comment"))
         {
             return $"Invite the audience to comment '{callToActionKeyword}'.";
@@ -284,6 +289,11 @@ public sealed class GenerateDailyContentPackageUseCase
             return $"Book through {profile.CalendlyUrl} or DM '{callToActionKeyword}' if you want the right next step.";
         }
 
+        if (RequiresWebsiteCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.WebsiteUrl))
+        {
+            return $"Visit {profile.WebsiteUrl} and use '{callToActionKeyword}' if you want help choosing the right option.";
+        }
+
         if (ContainsAny(profile.DesiredAction, "comment"))
         {
             return $"Comment '{callToActionKeyword}' to keep the conversation going.";
@@ -305,6 +315,8 @@ public sealed class GenerateDailyContentPackageUseCase
     private static string BuildRepurposeCallToAction(ClientProfile profile, string callToActionKeyword) =>
         RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl)
             ? $"Book via {profile.CalendlyUrl}"
+            : RequiresWebsiteCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.WebsiteUrl)
+                ? $"Visit {profile.WebsiteUrl}"
             : callToActionKeyword;
 
     private static string BuildEngagementPrompt(ClientProfile profile, DailyContentBrief brief) =>
@@ -319,11 +331,19 @@ public sealed class GenerateDailyContentPackageUseCase
             return $"Ready to take action? Book through {profile.CalendlyUrl} or DM '{callToActionKeyword}'.";
         }
 
+        if (RequiresWebsiteCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.WebsiteUrl))
+        {
+            return $"Ready to take action? Visit {profile.WebsiteUrl} or DM '{callToActionKeyword}' if you want help first.";
+        }
+
         return $"Would a template for this help? Comment {callToActionKeyword}.";
     }
 
     private static bool RequiresBookingCallToAction(ClientProfile profile) =>
         ContainsAny(profile.DesiredAction, "book", "consult", "call", "appointment");
+
+    private static bool RequiresWebsiteCallToAction(ClientProfile profile) =>
+        ContainsAny(profile.DesiredAction, "website", "site", "web", "page", "landing", "visit");
 
     private static bool ContainsAny(string? value, params string[] fragments)
     {

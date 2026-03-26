@@ -345,10 +345,10 @@ public sealed class OrchestrateVoiceAgentUseCase
 
     private static string BuildPromptSummary(Domain.Tenants.ClientProfile profile, LeadProfile lead, VoiceCallObjective objective) => objective switch
     {
-        VoiceCallObjective.Qualification => $"Qualify the lead, understand intent, and tie the conversation back to CTA keyword '{profile.CallToActionKeyword}'. Use a {profile.BrandTone.ToLowerInvariant()} tone and speak in {profile.ContentLanguage.ToLowerInvariant()}.",
+        VoiceCallObjective.Qualification => $"Qualify the lead, understand intent, and tie the conversation back to CTA keyword '{profile.CallToActionKeyword}'. Use a {profile.BrandTone.ToLowerInvariant()} tone and speak in {profile.ContentLanguage.ToLowerInvariant()}. Reference {ResolveWebsiteReference(profile)} if the lead asks for the main business site.",
         VoiceCallObjective.Booking => $"Help the lead book the next appointment after confirming fit. Current lead stage: {lead.CurrentStage}. The desired action is '{profile.DesiredAction}'. Use {ResolvePromptCalendlyReference(profile)} when a booking link is needed and speak in a {profile.BrandTone.ToLowerInvariant()} {profile.ContentLanguage.ToLowerInvariant()} style.",
         VoiceCallObjective.Reminder => $"Deliver the appointment reminder, confirm attendance, and keep the delivery {profile.BrandTone.ToLowerInvariant()} and {profile.ContentLanguage.ToLowerInvariant()}.",
-        _ => $"Re-engage the lead, resolve objections, and move them toward '{profile.DesiredAction}' while using a {profile.BrandTone.ToLowerInvariant()} {profile.ContentLanguage.ToLowerInvariant()} tone."
+        _ => $"Re-engage the lead, resolve objections, and move them toward '{profile.DesiredAction}' while using a {profile.BrandTone.ToLowerInvariant()} {profile.ContentLanguage.ToLowerInvariant()} tone. Reference {ResolveWebsiteReference(profile)} if they ask where to learn more."
     };
 
     private static string BuildVoiceReferenceUrl(string externalCallId) => $"https://voice-agent.local/calls/{externalCallId}";
@@ -360,6 +360,9 @@ public sealed class OrchestrateVoiceAgentUseCase
 
     private static string ResolvePromptCalendlyReference(Domain.Tenants.ClientProfile profile) =>
         string.IsNullOrWhiteSpace(profile.CalendlyUrl) ? "the configured booking link" : profile.CalendlyUrl;
+
+    private static string ResolveWebsiteReference(Domain.Tenants.ClientProfile profile) =>
+        string.IsNullOrWhiteSpace(profile.WebsiteUrl) ? "the configured business website" : profile.WebsiteUrl;
 
     private static IReadOnlyList<string> MergeTags(IReadOnlyList<string>? existing, IReadOnlyList<string> add) =>
         (existing ?? Array.Empty<string>())

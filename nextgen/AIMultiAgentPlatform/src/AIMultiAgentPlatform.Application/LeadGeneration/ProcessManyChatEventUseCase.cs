@@ -200,6 +200,11 @@ public sealed class ProcessManyChatEventUseCase
             fields["calendly_url"] = profile.CalendlyUrl;
         }
 
+        if (!string.IsNullOrWhiteSpace(profile.WebsiteUrl))
+        {
+            fields["website_url"] = profile.WebsiteUrl;
+        }
+
         return fields;
     }
 

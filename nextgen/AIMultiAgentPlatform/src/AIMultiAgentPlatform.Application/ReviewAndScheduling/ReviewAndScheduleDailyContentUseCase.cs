@@ -336,6 +336,13 @@ public sealed class ReviewAndScheduleDailyContentUseCase
             return ContainsIgnoreCase(corpus, "comment");
         }
 
+        if (RequiresWebsiteCallToAction(profile))
+        {
+            return ContainsIgnoreCase(corpus, profile.WebsiteUrl) ||
+                   ContainsIgnoreCase(corpus, "website") ||
+                   ContainsIgnoreCase(corpus, "site");
+        }
+
         return ContainsIgnoreCase(corpus, profile.CallToActionKeyword);
     }
 
@@ -361,6 +368,11 @@ public sealed class ReviewAndScheduleDailyContentUseCase
             return $"Invite the audience to book through {profile.CalendlyUrl} and DM '{callToActionKeyword}' if they want help before scheduling.";
         }
 
+        if (RequiresWebsiteCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.WebsiteUrl))
+        {
+            return $"Invite the audience to visit {profile.WebsiteUrl} and DM '{callToActionKeyword}' if they want help deciding before they click through.";
+        }
+
         if (ContainsIgnoreCase(profile.DesiredAction, "comment"))
         {
             return $"Invite the audience to comment '{callToActionKeyword}' and continue the conversation in DMs.";
@@ -377,6 +389,8 @@ public sealed class ReviewAndScheduleDailyContentUseCase
     private static string ResolveTargetCallToAction(Domain.Tenants.ClientProfile profile, string callToActionKeyword) =>
         RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl)
             ? $"Book via {profile.CalendlyUrl}"
+            : RequiresWebsiteCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.WebsiteUrl)
+                ? $"Visit {profile.WebsiteUrl}"
             : callToActionKeyword;
 
     private static bool RequiresBookingCallToAction(Domain.Tenants.ClientProfile profile) =>
@@ -384,4 +398,12 @@ public sealed class ReviewAndScheduleDailyContentUseCase
         ContainsIgnoreCase(profile.DesiredAction, "consult") ||
         ContainsIgnoreCase(profile.DesiredAction, "appointment") ||
         ContainsIgnoreCase(profile.DesiredAction, "call");
+
+    private static bool RequiresWebsiteCallToAction(Domain.Tenants.ClientProfile profile) =>
+        ContainsIgnoreCase(profile.DesiredAction, "website") ||
+        ContainsIgnoreCase(profile.DesiredAction, "site") ||
+        ContainsIgnoreCase(profile.DesiredAction, "web") ||
+        ContainsIgnoreCase(profile.DesiredAction, "page") ||
+        ContainsIgnoreCase(profile.DesiredAction, "landing") ||
+        ContainsIgnoreCase(profile.DesiredAction, "visit");
 }

@@ -16,6 +16,7 @@ public sealed record ClientProfile(
     string PrimaryContactPhone = "",
     IReadOnlyList<string>? PlatformLinks = null,
     string CalendlyUrl = "",
+    string WebsiteUrl = "",
     string MainGoal = "",
     string DesiredAction = "",
     string ContentLanguage = "English")
@@ -35,6 +36,7 @@ public sealed record ClientProfile(
             Platforms = NormalizeList(Platforms, ["Instagram"]),
             PlatformLinks = NormalizeList(PlatformLinks, Array.Empty<string>()),
             CalendlyUrl = NormalizeOptionalValue(CalendlyUrl),
+            WebsiteUrl = NormalizeOptionalValue(WebsiteUrl),
             MainGoal = NormalizeValue(MainGoal, "Generate more leads"),
             DesiredAction = NormalizeValue(DesiredAction, "Comment or DM for more details"),
             ContentLanguage = NormalizeLanguage(ContentLanguage),
