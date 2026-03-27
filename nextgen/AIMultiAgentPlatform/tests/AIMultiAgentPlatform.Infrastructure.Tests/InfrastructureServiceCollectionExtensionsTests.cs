@@ -1,12 +1,17 @@
 using AIMultiAgentPlatform.Application.Abstractions.AI;
+using AIMultiAgentPlatform.Application.Abstractions.Messaging;
 using AIMultiAgentPlatform.Application.Abstractions.Persistence;
 using AIMultiAgentPlatform.Application.Abstractions.Publishing;
 using AIMultiAgentPlatform.Application.Abstractions.Video;
 using AIMultiAgentPlatform.Infrastructure.Configuration;
 using AIMultiAgentPlatform.Infrastructure.DependencyInjection;
+using AIMultiAgentPlatform.Infrastructure.Messaging.InMemory;
+using AIMultiAgentPlatform.Infrastructure.Messaging.ServiceBus;
+using AIMultiAgentPlatform.Infrastructure.Persistence.Sql;
 using AIMultiAgentPlatform.Infrastructure.Storage;
 using AIMultiAgentPlatform.Infrastructure.AI.OpenAi;
 using AIMultiAgentPlatform.Infrastructure.Video.HeyGen;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -30,18 +35,24 @@ public sealed class InfrastructureServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void AddInfrastructure_WhenProductionSqlModeIsRequested_Throws()
+    public void AddInfrastructure_WhenProductionSqlModeIsRequested_RegistersProductionSkeleton()
     {
         var services = new ServiceCollection();
+        services.AddInfrastructure(
+            platformMode: "Production",
+            persistenceMode: "Sql",
+            messagingMode: "ServiceBus",
+            hostingMode: "Dedicated");
 
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            services.AddInfrastructure(
-                platformMode: "Production",
-                persistenceMode: "Sql",
-                messagingMode: "ServiceBus",
-                hostingMode: "Dedicated"));
+        using var provider = services.BuildServiceProvider();
+        var productionOptions = provider.GetRequiredService<ProductionInfrastructureOptions>();
+        var commandBus = provider.GetRequiredService<ICommandBus>();
+        var eventBus = provider.GetRequiredService<IEventBus>();
 
-        Assert.Contains("SQL persistence wiring has not been implemented yet", exception.Message, StringComparison.Ordinal);
+        Assert.True(productionOptions.SqlSkeletonEnabled);
+        Assert.True(productionOptions.ServiceBusSkeletonEnabled);
+        Assert.IsType<InMemoryCommandBus>(commandBus);
+        Assert.IsType<InMemoryEventBus>(eventBus);
     }
 
     [Fact]
@@ -55,6 +66,10 @@ public sealed class InfrastructureServiceCollectionExtensionsTests
         var openAiOptions = provider.GetRequiredService<OpenAiOptions>();
         var featureFlags = provider.GetRequiredService<FeatureFlagOptions>();
         var publicEndpointResolver = provider.GetRequiredService<IPublicWebhookUrlResolver>();
+        var sqlOptions = provider.GetRequiredService<SqlOptions>();
+        var serviceBusOptions = provider.GetRequiredService<ServiceBusOptions>();
+        var commandBus = provider.GetRequiredService<ICommandBus>();
+        var eventBus = provider.GetRequiredService<IEventBus>();
         var strategyPlanner = provider.GetRequiredService<ILLMStrategyPlanner>();
         var contentGenerator = provider.GetRequiredService<ILLMContentGenerator>();
         var guardrailValidator = provider.GetRequiredService<IContentGuardrailValidator>();
@@ -70,10 +85,14 @@ public sealed class InfrastructureServiceCollectionExtensionsTests
         var publishingProvider = provider.GetRequiredService<IPublishingProvider>();
 
         Assert.False(openAiOptions.Enabled);
+        Assert.False(sqlOptions.Enabled);
+        Assert.False(serviceBusOptions.Enabled);
         Assert.False(featureFlags.EnableLlmStrategyPlanning);
         Assert.False(featureFlags.EnableLlmContentGeneration);
         Assert.True(featureFlags.AllowHeuristicFallback);
         Assert.NotNull(publicEndpointResolver);
+        Assert.NotNull(commandBus);
+        Assert.NotNull(eventBus);
         Assert.NotNull(strategyPlanner);
         Assert.NotNull(contentGenerator);
         Assert.NotNull(guardrailValidator);
@@ -87,6 +106,75 @@ public sealed class InfrastructureServiceCollectionExtensionsTests
         Assert.NotNull(videoAssetStore);
         Assert.NotNull(webhookEndpointManager);
         Assert.NotNull(publishingProvider);
+    }
+
+    [Fact]
+    public async Task AddInfrastructure_WhenProductionSqlAndServiceBusAreConfigured_RegistersConcreteSkeletonServices()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["PlatformMode"] = "Production",
+                ["Infrastructure:PersistenceMode"] = "Sql",
+                ["Infrastructure:MessagingMode"] = "ServiceBus",
+                ["Infrastructure:HostingMode"] = "Dedicated",
+                ["Sql:Enabled"] = "true",
+                ["Sql:ConnectionString"] = "Server=(localdb)\\mssqllocaldb;Database=Aimap;Trusted_Connection=True;",
+                ["ServiceBus:Enabled"] = "true",
+                ["ServiceBus:ConnectionString"] = "Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=test="
+            })
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddInfrastructure(configuration);
+
+        await using var provider = services.BuildServiceProvider();
+        var productionOptions = provider.GetRequiredService<ProductionInfrastructureOptions>();
+        var dbContextFactory = provider.GetRequiredService<IDbContextFactory<AiPlatformDbContext>>();
+        var commandBus = provider.GetRequiredService<ICommandBus>();
+        var eventBus = provider.GetRequiredService<IEventBus>();
+
+        Assert.True(productionOptions.SqlSkeletonEnabled);
+        Assert.True(productionOptions.ServiceBusSkeletonEnabled);
+        Assert.IsType<ServiceBusCommandBus>(commandBus);
+        Assert.IsType<ServiceBusEventBus>(eventBus);
+        Assert.NotNull(dbContextFactory);
+    }
+
+    [Fact]
+    public void SqlOptions_Resolve_UsesFallbacks()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Sql:Enabled"] = "true",
+                ["Sql:CommandTimeoutSeconds"] = "0"
+            })
+            .Build();
+
+        var options = SqlOptions.Resolve(configuration);
+
+        Assert.True(options.Enabled);
+        Assert.Equal(SqlOptions.Default.CommandTimeoutSeconds, options.CommandTimeoutSeconds);
+        Assert.False(options.HasRequiredConfiguration);
+    }
+
+    [Fact]
+    public void ServiceBusOptions_Resolve_UsesFallbacks()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ServiceBus:Enabled"] = "true"
+            })
+            .Build();
+
+        var options = ServiceBusOptions.Resolve(configuration);
+
+        Assert.True(options.Enabled);
+        Assert.Equal(ServiceBusOptions.Default.CommandEntityPrefix, options.CommandEntityPrefix);
+        Assert.Equal(ServiceBusOptions.Default.EventEntityPrefix, options.EventEntityPrefix);
+        Assert.False(options.HasRequiredConfiguration);
     }
 
     [Fact]

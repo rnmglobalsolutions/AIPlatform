@@ -1,5 +1,6 @@
 using AIMultiAgentPlatform.Application.Abstractions.AI;
 using AIMultiAgentPlatform.Application.Abstractions;
+using AIMultiAgentPlatform.Application.Abstractions.Messaging;
 using AIMultiAgentPlatform.Application.Abstractions.Publishing;
 using AIMultiAgentPlatform.Application.Abstractions.Persistence;
 using AIMultiAgentPlatform.Application.Abstractions.Reporting;
@@ -10,15 +11,20 @@ using AIMultiAgentPlatform.Infrastructure.AI.OpenAi;
 using AIMultiAgentPlatform.Infrastructure.Configuration;
 using AIMultiAgentPlatform.Infrastructure.Persistence;
 using AIMultiAgentPlatform.Infrastructure.Persistence.TableStorage;
+using AIMultiAgentPlatform.Infrastructure.Persistence.Sql;
 using AIMultiAgentPlatform.Infrastructure.Publishing.InMemory;
 using AIMultiAgentPlatform.Infrastructure.Publishing.Buffer;
 using AIMultiAgentPlatform.Infrastructure.Reporting;
 using AIMultiAgentPlatform.Infrastructure.Storage;
+using AIMultiAgentPlatform.Infrastructure.Messaging.InMemory;
+using AIMultiAgentPlatform.Infrastructure.Messaging.ServiceBus;
 using AIMultiAgentPlatform.Infrastructure.Video;
 using AIMultiAgentPlatform.Infrastructure.Video.HeyGen;
 using AIMultiAgentPlatform.Infrastructure.Video.InMemory;
 using AIMultiAgentPlatform.Infrastructure.Voice;
 using Azure.Data.Tables;
+using Azure.Messaging.ServiceBus;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -74,6 +80,8 @@ public static class InfrastructureServiceCollectionExtensions
         var blobStorageOptions = BlobStorageOptions.Resolve(configuration);
         var bufferOptions = BufferOptions.Resolve(configuration);
         var publicEndpointOptions = PublicEndpointOptions.Resolve(configuration);
+        var sqlOptions = SqlOptions.Resolve(configuration);
+        var serviceBusOptions = ServiceBusOptions.Resolve(configuration);
         var featureFlags = FeatureFlagOptions.Resolve(configuration);
 
         services.AddSingleton(openAiOptions);
@@ -81,10 +89,14 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton(blobStorageOptions);
         services.AddSingleton(bufferOptions);
         services.AddSingleton(publicEndpointOptions);
+        services.AddSingleton(sqlOptions);
+        services.AddSingleton(serviceBusOptions);
         services.AddSingleton(featureFlags);
         services.AddSingleton<IPublicWebhookUrlResolver, ConfigurationPublicWebhookUrlResolver>();
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IIdGenerator, GuidIdGenerator>();
+        services.AddSingleton<ICommandBus, InMemoryCommandBus>();
+        services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<ILLMStrategyPlanner, InMemoryLlmStrategyPlanner>();
         services.AddSingleton<ILLMContentGenerator, InMemoryLlmContentGenerator>();
         services.AddSingleton<IContentGuardrailValidator, PermissiveContentGuardrailValidator>();
@@ -159,12 +171,65 @@ public static class InfrastructureServiceCollectionExtensions
         InfrastructureModeSettings settings,
         IConfiguration? configuration)
     {
+        var productionOptions = ProductionInfrastructureOptions.Disabled;
+
         if (settings.PersistenceMode == PersistenceMode.Sql)
         {
-            throw new NotSupportedException("SQL persistence wiring has not been implemented yet. Use InMemory for production scaffolding or finish the SQL adapters first.");
+            services.AddSqlInfrastructureSkeleton(configuration);
+            productionOptions = productionOptions with { SqlSkeletonEnabled = true };
         }
 
+        if (settings.MessagingMode == MessagingMode.ServiceBus)
+        {
+            services.AddServiceBusInfrastructureSkeleton(configuration);
+            productionOptions = productionOptions with { ServiceBusSkeletonEnabled = true };
+        }
+
+        services.AddSingleton(productionOptions);
         return services.AddInMemoryInfrastructureAdapters();
+    }
+
+    private static IServiceCollection AddSqlInfrastructureSkeleton(
+        this IServiceCollection services,
+        IConfiguration? configuration)
+    {
+        var sqlOptions = SqlOptions.Resolve(configuration);
+        services.AddSingleton(sqlOptions);
+
+        if (!sqlOptions.Enabled || !sqlOptions.HasRequiredConfiguration)
+        {
+            return services;
+        }
+
+        services.AddDbContextFactory<AiPlatformDbContext>(options =>
+        {
+            options.UseSqlServer(
+                sqlOptions.ConnectionString,
+                sqlServerOptions => sqlServerOptions.CommandTimeout(sqlOptions.CommandTimeoutSeconds));
+        });
+
+        return services;
+    }
+
+    private static IServiceCollection AddServiceBusInfrastructureSkeleton(
+        this IServiceCollection services,
+        IConfiguration? configuration)
+    {
+        var serviceBusOptions = ServiceBusOptions.Resolve(configuration);
+        services.AddSingleton(serviceBusOptions);
+
+        if (!serviceBusOptions.Enabled || !serviceBusOptions.HasRequiredConfiguration)
+        {
+            return services;
+        }
+
+        services.AddSingleton(new ServiceBusClient(serviceBusOptions.ConnectionString));
+        services.AddSingleton<ServiceBusCommandBus>();
+        services.AddSingleton<ICommandBus>(sp => sp.GetRequiredService<ServiceBusCommandBus>());
+        services.AddSingleton<ServiceBusEventBus>();
+        services.AddSingleton<IEventBus>(sp => sp.GetRequiredService<ServiceBusEventBus>());
+
+        return services;
     }
 
     private static IServiceCollection AddInMemoryInfrastructureAdapters(this IServiceCollection services)
