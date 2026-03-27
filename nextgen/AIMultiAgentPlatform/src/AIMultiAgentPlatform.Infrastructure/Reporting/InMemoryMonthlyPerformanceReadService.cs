@@ -11,6 +11,7 @@ public sealed class InMemoryMonthlyPerformanceReadService : IMonthlyPerformanceR
     private readonly Persistence.InMemoryApprovalRequestRepository _approvalRequestRepository;
     private readonly Persistence.InMemorySchedulingJobRepository _schedulingJobRepository;
     private readonly Persistence.InMemoryPublishedContentRecordRepository _publishedContentRecordRepository;
+    private readonly Persistence.InMemoryPublishedContentMetricSnapshotRepository _publishedContentMetricSnapshotRepository;
     private readonly Persistence.InMemoryLeadProfileRepository _leadProfileRepository;
     private readonly Persistence.InMemoryBookingRecordRepository _bookingRecordRepository;
     private readonly Persistence.InMemoryReminderScheduleRepository _reminderScheduleRepository;
@@ -23,6 +24,7 @@ public sealed class InMemoryMonthlyPerformanceReadService : IMonthlyPerformanceR
         Persistence.InMemoryApprovalRequestRepository approvalRequestRepository,
         Persistence.InMemorySchedulingJobRepository schedulingJobRepository,
         Persistence.InMemoryPublishedContentRecordRepository publishedContentRecordRepository,
+        Persistence.InMemoryPublishedContentMetricSnapshotRepository publishedContentMetricSnapshotRepository,
         Persistence.InMemoryLeadProfileRepository leadProfileRepository,
         Persistence.InMemoryBookingRecordRepository bookingRecordRepository,
         Persistence.InMemoryReminderScheduleRepository reminderScheduleRepository,
@@ -34,6 +36,7 @@ public sealed class InMemoryMonthlyPerformanceReadService : IMonthlyPerformanceR
         _approvalRequestRepository = approvalRequestRepository;
         _schedulingJobRepository = schedulingJobRepository;
         _publishedContentRecordRepository = publishedContentRecordRepository;
+        _publishedContentMetricSnapshotRepository = publishedContentMetricSnapshotRepository;
         _leadProfileRepository = leadProfileRepository;
         _bookingRecordRepository = bookingRecordRepository;
         _reminderScheduleRepository = reminderScheduleRepository;
@@ -58,6 +61,23 @@ public sealed class InMemoryMonthlyPerformanceReadService : IMonthlyPerformanceR
             .Where(item => item.TenantId.Value == tenantId && item.UpdatedUtc.Year == year && item.UpdatedUtc.Month == month)
             .ToArray();
 
+        var publishedContentRecords = _publishedContentRecordRepository
+            .ListAll()
+            .Where(item => requestIds.Contains(item.DailyContentRequestId))
+            .ToArray();
+
+        var publishedContentRecordIds = publishedContentRecords
+            .Select(item => item.PublishedContentRecordId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var metricSnapshots = _publishedContentMetricSnapshotRepository
+            .ListAll()
+            .Where(item =>
+                publishedContentRecordIds.Contains(item.PublishedContentRecordId) &&
+                item.CapturedUtc.Year == year &&
+                item.CapturedUtc.Month == month)
+            .ToArray();
+
         var reminderSchedules = _reminderScheduleRepository
             .ListAll()
             .Where(item => item.TenantId.Value == tenantId && item.CreatedUtc.Year == year && item.CreatedUtc.Month == month)
@@ -75,10 +95,11 @@ public sealed class InMemoryMonthlyPerformanceReadService : IMonthlyPerformanceR
                 _qualityReviewRepository.ListAll().Where(item => requestIds.Contains(item.DailyContentRequestId)).ToArray(),
                 _approvalRequestRepository.ListAll().Where(item => requestIds.Contains(item.DailyContentRequestId)).ToArray(),
                 _schedulingJobRepository.ListAll().Where(item => requestIds.Contains(item.DailyContentRequestId)).ToArray(),
-                _publishedContentRecordRepository.ListAll().Where(item => requestIds.Contains(item.DailyContentRequestId)).ToArray(),
+                publishedContentRecords,
                 leadProfiles,
                 bookingRecords,
                 reminderSchedules,
-                followUpSequences));
+                followUpSequences,
+                metricSnapshots));
     }
 }

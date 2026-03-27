@@ -92,7 +92,10 @@ public sealed class OrchestrateBookingAgentUseCase
             calendlyUrl,
             calendlyEventType,
             request.AppointmentUtc,
-            _clock.UtcNow);
+            _clock.UtcNow,
+            lead.SourcePublishedContentRecordId,
+            lead.SourcePlatform,
+            lead.SourceProviderName);
 
         var preferredChannels = ResolvePreferredChannels(request.PreferredChannels, lead.Channel, !lead.Email.EndsWith("@example.invalid", StringComparison.OrdinalIgnoreCase));
 

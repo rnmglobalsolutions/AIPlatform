@@ -81,7 +81,7 @@ public sealed class InMemoryRepositoriesTests
         var quality = new QualityReview("quality_123", "daily_request_123", tenantId, 8.0, 8.1, 8.2, 8.3, 8.15, "Feedback", "Optimized CTA", DateTime.UtcNow);
         var approval = new ApprovalRequest("approval_123", "daily_request_123", tenantId, ApprovalStatus.Approved, "Looks good", DateTime.UtcNow);
         var scheduling = new SchedulingJob("schedule_123", "daily_request_123", tenantId, SchedulingStatus.Scheduled, "Scheduled", DateTime.UtcNow, [new PublicationTarget("Instagram", DateTime.UtcNow, "Payload")]);
-        var connectedPublishingProfile = new ConnectedPublishingProfile("publish_profile_123", tenantId, "Buffer", "Instagram", "profile_123", "token_123", "RNM Instagram", DateTime.UtcNow, DateTime.UtcNow);
+        var connectedPublishingProfile = new ConnectedPublishingProfile("publish_profile_123", tenantId, "Buffer", "Instagram", "profile_123", "publish_secret_123", "RNM Instagram", DateTime.UtcNow, DateTime.UtcNow);
         var publishedRecord = new PublishedContentRecord("published_123", "daily_request_123", "schedule_123", tenantId, "Buffer", "Instagram", "profile_123", "post_123", "", "Caption", "https://blob.test/video.mp4", PublishedContentStatus.Published, string.Empty, DateTime.UtcNow);
         var lead = new LeadProfile("lead_123", tenantId, "contact_123", "Jane", "Doe", "jane@rnm.test", "Instagram", LeadLifecycleStage.MarketingQualified, "Keyword capture", "BOOK", DateTime.UtcNow);
         var manyChatState = new ManyChatContactState("mc_123", tenantId, "contact_123", ["leadgen-keyword"], new Dictionary<string, string> { ["lead_stage"] = "MarketingQualified" }, "BOOK", "leadgen-keyword-capture", DateTime.UtcNow);
@@ -145,6 +145,7 @@ public sealed class InMemoryRepositoriesTests
         Assert.Equal("approval_123", approvalRepository.Find("approval_123")!.ApprovalRequestId);
         Assert.Equal("schedule_123", schedulingRepository.Find("schedule_123")!.SchedulingJobId);
         Assert.Equal("publish_profile_123", (await connectedPublishingProfileRepository.FindByTenantAndPlatformAsync("tenant_123", "Instagram", CancellationToken.None))!.ConnectedPublishingProfileId);
+        Assert.Equal("publish_profile_123", (await connectedPublishingProfileRepository.FindByTenantPlatformAndProviderAsync("tenant_123", "Instagram", "Buffer", CancellationToken.None))!.ConnectedPublishingProfileId);
         Assert.Equal("published_123", (await publishedContentRecordRepository.FindByRequestIdAsync("daily_request_123", CancellationToken.None)).Single().PublishedContentRecordId);
         Assert.Equal("lead_123", leadRepository.Find("tenant_123", "contact_123")!.LeadProfileId);
         Assert.Equal("mc_123", manyChatStateRepository.Find("tenant_123", "contact_123")!.ManyChatContactStateId);

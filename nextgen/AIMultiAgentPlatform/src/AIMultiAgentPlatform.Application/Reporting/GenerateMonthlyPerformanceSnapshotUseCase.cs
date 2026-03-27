@@ -61,7 +61,9 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCase
         var postsPublished = source.PublishedContentRecords.Count > 0
             ? source.PublishedContentRecords.Count(record => record.Status == Domain.Publishing.PublishedContentStatus.Published)
             : source.SchedulingJobs
-                .Where(job => job.Status == Domain.Publishing.SchedulingStatus.Published)
+                .Where(job =>
+                    job.Status == Domain.Publishing.SchedulingStatus.Published ||
+                    job.Status == Domain.Publishing.SchedulingStatus.Scheduled)
                 .Sum(job => job.Targets.Count);
 
         var approvedContentPackages = source.ApprovalRequests.Count(item => item.Status == ApprovalStatus.Approved);
@@ -70,7 +72,23 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCase
             ? 0
             : Math.Round(source.QualityReviews.Average(item => item.OverallScore), 2);
 
-        var topPerformer = ResolveTopPerformer(source);
+        var latestMetricSnapshots = SelectLatestMetricSnapshots(source);
+        var totalReach = latestMetricSnapshots.Sum(item => item.Reach);
+        var totalClicks = latestMetricSnapshots.Sum(item => item.Clicks);
+        var totalLikes = latestMetricSnapshots.Sum(item => item.Likes);
+        var totalComments = latestMetricSnapshots.Sum(item => item.Comments);
+        var totalShares = latestMetricSnapshots.Sum(item => item.Shares);
+        var attributedRecordIds = source.PublishedContentRecords
+            .Select(item => item.PublishedContentRecordId)
+            .ToHashSet(StringComparer.Ordinal);
+        var attributedLeads = source.LeadProfiles.Count(item =>
+            !string.IsNullOrWhiteSpace(item.SourcePublishedContentRecordId) &&
+            attributedRecordIds.Contains(item.SourcePublishedContentRecordId));
+        var attributedBookings = source.BookingRecords.Count(item =>
+            !string.IsNullOrWhiteSpace(item.AttributedPublishedContentRecordId) &&
+            attributedRecordIds.Contains(item.AttributedPublishedContentRecordId));
+
+        var topPerformer = ResolveTopPerformer(source, latestMetricSnapshots);
         var leadsGenerated = source.LeadProfiles.Count;
         var marketingQualifiedLeads = source.LeadProfiles.Count(item => item.CurrentStage >= LeadLifecycleStage.MarketingQualified);
         var bookingReadyLeads = source.LeadProfiles.Count(item => item.CurrentStage >= LeadLifecycleStage.BookingReady);
@@ -80,15 +98,19 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCase
         var bookingFocused = IsBookingFocused(tenant.Profile.DesiredAction);
         var bilingual = string.Equals(tenant.Profile.ContentLanguage, "Bilingual", StringComparison.OrdinalIgnoreCase);
 
-        var estimatedEngagement = Math.Round(
-            (averageQualityScore * Math.Max(postsPublished, 1)) +
-            (marketingQualifiedLeads * 3.5) +
-            (bilingual ? 2.0 : 0),
-            2);
-        var estimatedClicks = Math.Round(
-            (appointmentsBooked * (bookingFocused ? 5.25 : 4.0)) +
-            (marketingQualifiedLeads * (bookingFocused ? 1.75 : 1.25)),
-            2);
+        var estimatedEngagement = latestMetricSnapshots.Count > 0
+            ? totalLikes + totalComments + totalShares
+            : Math.Round(
+                (averageQualityScore * Math.Max(postsPublished, 1)) +
+                (marketingQualifiedLeads * 3.5) +
+                (bilingual ? 2.0 : 0),
+                2);
+        var estimatedClicks = latestMetricSnapshots.Count > 0
+            ? totalClicks
+            : Math.Round(
+                (appointmentsBooked * (bookingFocused ? 5.25 : 4.0)) +
+                (marketingQualifiedLeads * (bookingFocused ? 1.75 : 1.25)),
+                2);
 
         var snapshot = new MonthlyPerformanceSnapshot(
             _idGenerator.NewId("monthly_snapshot"),
@@ -111,7 +133,14 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCase
             followUpTouchesScheduled,
             estimatedEngagement,
             estimatedClicks,
-            _clock.UtcNow);
+            _clock.UtcNow,
+            totalReach,
+            totalClicks,
+            totalLikes,
+            totalComments,
+            totalShares,
+            attributedLeads,
+            attributedBookings);
 
         await _monthlyPerformanceSnapshotRepository.SaveAsync(snapshot, cancellationToken);
 
@@ -135,20 +164,65 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCase
                 snapshot.ReminderTouchesScheduled,
                 snapshot.FollowUpTouchesScheduled,
                 snapshot.EstimatedEngagement,
-                snapshot.EstimatedClicks));
+                snapshot.EstimatedClicks,
+                snapshot.TotalReach,
+                snapshot.TotalClicks,
+                snapshot.TotalLikes,
+                snapshot.TotalComments,
+                snapshot.TotalShares,
+                snapshot.AttributedLeads,
+                snapshot.AttributedBookings));
     }
 
-    private static string ResolveTopPerformer(MonthlyPerformanceSource source)
+    private static IReadOnlyList<Domain.Publishing.PublishedContentMetricSnapshot> SelectLatestMetricSnapshots(MonthlyPerformanceSource source) =>
+        (source.PublishedContentMetricSnapshots ?? Array.Empty<Domain.Publishing.PublishedContentMetricSnapshot>())
+            .GroupBy(item => item.PublishedContentRecordId, StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(item => item.CapturedUtc).First())
+            .ToArray();
+
+    private static string ResolveTopPerformer(
+        MonthlyPerformanceSource source,
+        IReadOnlyList<Domain.Publishing.PublishedContentMetricSnapshot> latestMetricSnapshots)
     {
         if (source.PrimaryAssets.Count == 0)
         {
             return "No content generated";
         }
 
-        var scoreByRequestId = source.QualityReviews.ToDictionary(item => item.DailyContentRequestId, item => item.OverallScore, StringComparer.Ordinal);
+        if (latestMetricSnapshots.Count > 0)
+        {
+            var scoreByRequestId = source.PublishedContentRecords
+                .Join(
+                    latestMetricSnapshots,
+                    record => record.PublishedContentRecordId,
+                    snapshot => snapshot.PublishedContentRecordId,
+                    (record, snapshot) => new
+                    {
+                        record.DailyContentRequestId,
+                        Score = snapshot.Likes + snapshot.Comments + snapshot.Shares + snapshot.Clicks
+                    })
+                .GroupBy(item => item.DailyContentRequestId, StringComparer.Ordinal)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Sum(item => item.Score),
+                    StringComparer.Ordinal);
+
+            var topByMetrics = source.PrimaryAssets
+                .OrderByDescending(asset => scoreByRequestId.TryGetValue(asset.DailyContentRequestId, out var score) ? score : 0)
+                .ThenBy(asset => asset.Headline, StringComparer.Ordinal)
+                .Select(asset => asset.Headline)
+                .FirstOrDefault();
+
+            if (!string.IsNullOrWhiteSpace(topByMetrics))
+            {
+                return topByMetrics;
+            }
+        }
+
+        var qualityScoreByRequestId = source.QualityReviews.ToDictionary(item => item.DailyContentRequestId, item => item.OverallScore, StringComparer.Ordinal);
 
         return source.PrimaryAssets
-            .OrderByDescending(asset => scoreByRequestId.TryGetValue(asset.DailyContentRequestId, out var score) ? score : 0)
+            .OrderByDescending(asset => qualityScoreByRequestId.TryGetValue(asset.DailyContentRequestId, out var score) ? score : 0)
             .ThenBy(asset => asset.Headline, StringComparer.Ordinal)
             .Select(asset => asset.Headline)
             .First();

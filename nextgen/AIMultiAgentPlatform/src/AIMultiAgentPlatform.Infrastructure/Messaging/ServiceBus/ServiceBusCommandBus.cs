@@ -72,8 +72,8 @@ public sealed class ServiceBusCommandBus : ICommandBus, IAsyncDisposable
         return message;
     }
 
-    private static string BuildEntityName(string prefix, string name) =>
-        $"{prefix}-{NormalizeName(name)}";
+    private string BuildEntityName(string prefix, string name) =>
+        _options.ResolveCommandEntityName(name);
 
     private static string NormalizeName(string value)
     {

@@ -51,10 +51,12 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCaseTests
             [new SchedulingJob("schedule_001", "daily_request_001", tenant.TenantId, SchedulingStatus.Published, "Scheduled", DateTime.UtcNow, [new PublicationTarget("Instagram", DateTime.UtcNow, "Payload"), new PublicationTarget("LinkedIn", DateTime.UtcNow, "Payload")])],
             [new PublishedContentRecord("published_001", "daily_request_001", "schedule_001", tenant.TenantId, "Buffer", "Instagram", "profile_1", "post_1", "", "Caption", "https://blob.test/video.mp4", PublishedContentStatus.Published, string.Empty, DateTime.UtcNow),
              new PublishedContentRecord("published_002", "daily_request_001", "schedule_001", tenant.TenantId, "Buffer", "LinkedIn", "profile_2", "post_2", "", "Caption", "https://blob.test/video.mp4", PublishedContentStatus.Published, string.Empty, DateTime.UtcNow)],
-            [new LeadProfile("lead_001", tenant.TenantId, "contact_001", "Jane", "Doe", "jane@rnm.test", "Instagram", LeadLifecycleStage.Booked, "Intent", "BOOK", DateTime.UtcNow)],
-            [new BookingRecord("booking_001", tenant.TenantId, "lead_001", "contact_001", BookingStatus.Booked, "https://calendly.test", "strategy-call", DateTime.UtcNow, DateTime.UtcNow)],
+            [new LeadProfile("lead_001", tenant.TenantId, "contact_001", "Jane", "Doe", "jane@rnm.test", "Instagram", LeadLifecycleStage.Booked, "Intent", "BOOK", DateTime.UtcNow, "published_001", "Instagram", "Buffer", "post_1")],
+            [new BookingRecord("booking_001", tenant.TenantId, "lead_001", "contact_001", BookingStatus.Booked, "https://calendly.test", "strategy-call", DateTime.UtcNow, DateTime.UtcNow, "published_001", "Instagram", "Buffer")],
             [new ReminderSchedule("reminder_001", tenant.TenantId, "booking_001", ReminderScheduleStatus.Scheduled, [new ReminderTouch(Domain.Communications.CommunicationChannel.Email, DateTime.UtcNow, "appointment-reminder-24h")], DateTime.UtcNow)],
-            [new FollowUpSequence("followup_001", tenant.TenantId, "lead_001", FollowUpSequenceStatus.Scheduled, "No booking", [new FollowUpStep(Domain.Communications.CommunicationChannel.Instagram, DateTime.UtcNow, "follow-up-day-1")], DateTime.UtcNow)]);
+            [new FollowUpSequence("followup_001", tenant.TenantId, "lead_001", FollowUpSequenceStatus.Scheduled, "No booking", [new FollowUpStep(Domain.Communications.CommunicationChannel.Instagram, DateTime.UtcNow, "follow-up-day-1")], DateTime.UtcNow)],
+            [new PublishedContentMetricSnapshot("metric_001", "published_001", tenant.TenantId, "Buffer", "Instagram", "sent", 1200, 33, 18, 6, 3, DateTime.UtcNow),
+             new PublishedContentMetricSnapshot("metric_002", "published_002", tenant.TenantId, "Buffer", "LinkedIn", "sent", 900, 17, 12, 4, 2, DateTime.UtcNow)]);
 
         var snapshotRepository = new FakeSnapshotRepository();
         var useCase = new GenerateMonthlyPerformanceSnapshotUseCase(
@@ -80,8 +82,13 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCaseTests
         Assert.Equal("Short video: Authority", result.Value.TopPerformingAssetTitle);
         Assert.Equal(8.7, result.Value.AverageQualityScore);
         Assert.Equal(1, result.Value.AppointmentsBooked);
+        Assert.Equal(2100, result.Value.TotalReach);
+        Assert.Equal(50, result.Value.TotalClicks);
+        Assert.Equal(1, result.Value.AttributedLeads);
+        Assert.Equal(1, result.Value.AttributedBookings);
         Assert.Equal("Bilingual", snapshotRepository.Saved!.ContentLanguage);
         Assert.Equal("Book a consultation from the content", snapshotRepository.Saved.PrimaryConversionAction);
+        Assert.Equal(2100, snapshotRepository.Saved.TotalReach);
         Assert.NotNull(snapshotRepository.Saved);
     }
 

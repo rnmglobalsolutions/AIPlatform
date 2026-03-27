@@ -109,6 +109,7 @@ module computeModule './compute.bicep' = {
     apiAppName: apiAppName
     workerFunctionAppName: workerFunctionAppName
     managedIdentityResourceId: identityModule.outputs.resourceId
+    managedIdentityClientId: identityModule.outputs.clientId
     storageAccountName: storageModule.outputs.storageAccountName
     appInsightsConnectionString: monitoringModule.outputs.applicationInsightsConnectionString
     keyVaultUri: keyVaultModule.outputs.vaultUri

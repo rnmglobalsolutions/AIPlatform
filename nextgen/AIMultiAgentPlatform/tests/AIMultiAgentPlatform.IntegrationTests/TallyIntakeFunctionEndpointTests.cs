@@ -103,6 +103,7 @@ public sealed class TallyIntakeFunctionEndpointTests
 
         return new TallyIntakeFunction(
             services.GetRequiredService<ProcessTallySubmissionUseCase>(),
+            services.GetRequiredService<EnqueueProcessTallySubmissionUseCase>(),
             configuration,
             NullLogger<TallyIntakeFunction>.Instance);
     }

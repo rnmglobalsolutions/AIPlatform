@@ -5,4 +5,6 @@ public sealed record UpsertConnectedPublishingProfileResponse(
     string ProviderName,
     string Platform,
     string ExternalProfileId,
-    string DisplayName);
+    string DisplayName,
+    string AccessTokenSecretReference,
+    bool HasAccessTokenSecret);

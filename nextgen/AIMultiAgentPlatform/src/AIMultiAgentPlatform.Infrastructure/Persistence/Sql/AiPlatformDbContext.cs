@@ -20,6 +20,8 @@ public sealed class AiPlatformDbContext : DbContext
 
     public DbSet<SqlInboxMessageEntity> InboxMessages => Set<SqlInboxMessageEntity>();
 
+    public DbSet<SqlAggregateDocumentEntity> AggregateDocuments => Set<SqlAggregateDocumentEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -50,6 +52,26 @@ public sealed class AiPlatformDbContext : DbContext
             entity.Property(item => item.TenantId).HasMaxLength(128);
             entity.Property(item => item.PayloadJson).HasColumnType("nvarchar(max)");
             entity.HasIndex(item => item.ProcessedUtc);
+        });
+
+        modelBuilder.Entity<SqlAggregateDocumentEntity>(entity =>
+        {
+            entity.ToTable("AggregateDocuments");
+            entity.HasKey(item => new { item.AggregateType, item.DocumentId });
+            entity.Property(item => item.AggregateType).HasMaxLength(128);
+            entity.Property(item => item.DocumentId).HasMaxLength(128);
+            entity.Property(item => item.TenantId).HasMaxLength(128);
+            entity.Property(item => item.LookupKey).HasMaxLength(256);
+            entity.Property(item => item.LookupKey2).HasMaxLength(256);
+            entity.Property(item => item.LookupKey3).HasMaxLength(256);
+            entity.Property(item => item.PayloadJson).HasColumnType("nvarchar(max)");
+            entity.HasIndex(item => new { item.AggregateType, item.TenantId, item.LookupKey });
+            entity.HasIndex(item => new { item.AggregateType, item.TenantId, item.LookupKey2 });
+            entity.HasIndex(item => new { item.AggregateType, item.TenantId, item.LookupKey3 });
+            entity.HasIndex(item => new { item.AggregateType, item.LookupKey });
+            entity.HasIndex(item => new { item.AggregateType, item.LookupKey2 });
+            entity.HasIndex(item => new { item.AggregateType, item.LookupKey3 });
+            entity.HasIndex(item => new { item.AggregateType, item.TenantId, item.SortUtc });
         });
     }
 }

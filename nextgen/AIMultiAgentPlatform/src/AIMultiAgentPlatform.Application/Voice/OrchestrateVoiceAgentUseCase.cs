@@ -165,7 +165,10 @@ public sealed class OrchestrateVoiceAgentUseCase
                         ResolveBookingReferenceUrl(tenant.Profile, providerResult.ExternalCallId),
                         "voice-booking",
                         providerResult.AppointmentUtc ?? now.AddDays(2),
-                        now);
+                        now,
+                        lead.SourcePublishedContentRecordId,
+                        lead.SourcePlatform,
+                        lead.SourceProviderName);
                     reminderSchedule = BuildImmediateVoiceReminderSchedule(tenant.TenantId, bookingRecord, providerResult.AppointmentUtc ?? now.AddDays(2));
                     tagsToAdd = ["voice-booked", "appointment-booked", "voice-reminders-scheduled"];
                     fieldsToUpsert = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -193,7 +196,10 @@ public sealed class OrchestrateVoiceAgentUseCase
                         ResolveBookingReferenceUrl(tenant.Profile, providerResult.ExternalCallId),
                         "voice-booking",
                         null,
-                        now);
+                        now,
+                        lead.SourcePublishedContentRecordId,
+                        lead.SourcePlatform,
+                        lead.SourceProviderName);
                     followUpSequence = BuildVoiceFollowUpSequence(tenant.TenantId, lead.LeadProfileId, "Voice booking handoff needs completion.");
                     tagsToAdd = ["voice-booking-intent", "booking-link-sent"];
                     fieldsToUpsert = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

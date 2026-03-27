@@ -31,6 +31,7 @@ public sealed class ReviewAndScheduleDailyContentUseCase
     private readonly IQualityReviewRepository _qualityReviewRepository;
     private readonly IApprovalRequestRepository _approvalRequestRepository;
     private readonly ISchedulingJobRepository _schedulingJobRepository;
+    private readonly IConnectedPublishingProfileRepository _connectedPublishingProfileRepository;
     private readonly IIdGenerator _idGenerator;
     private readonly IClock _clock;
     private readonly EvaluateGeneratedContentUseCase _evaluateGeneratedContentUseCase;
@@ -46,6 +47,7 @@ public sealed class ReviewAndScheduleDailyContentUseCase
         IQualityReviewRepository qualityReviewRepository,
         IApprovalRequestRepository approvalRequestRepository,
         ISchedulingJobRepository schedulingJobRepository,
+        IConnectedPublishingProfileRepository connectedPublishingProfileRepository,
         IIdGenerator idGenerator,
         IClock clock,
         EvaluateGeneratedContentUseCase? evaluateGeneratedContentUseCase = null)
@@ -60,6 +62,7 @@ public sealed class ReviewAndScheduleDailyContentUseCase
         _qualityReviewRepository = qualityReviewRepository;
         _approvalRequestRepository = approvalRequestRepository;
         _schedulingJobRepository = schedulingJobRepository;
+        _connectedPublishingProfileRepository = connectedPublishingProfileRepository;
         _idGenerator = idGenerator;
         _clock = clock;
         _evaluateGeneratedContentUseCase = evaluateGeneratedContentUseCase ?? new EvaluateGeneratedContentUseCase();
@@ -110,7 +113,8 @@ public sealed class ReviewAndScheduleDailyContentUseCase
         var complianceReview = BuildComplianceReview(tenant, dailyRequest, brief, primaryAsset, captionAsset, repurposedAssetBundle);
         var qualityReview = BuildQualityReview(tenant, dailyRequest, brief, primaryAsset, captionAsset, repurposedAssetBundle);
         var approvalRequest = BuildApprovalRequest(tenant, dailyRequest, complianceReview, qualityReview);
-        var schedulingJob = BuildSchedulingJob(tenant, dailyRequest, primaryAsset, captionAsset, approvalRequest);
+        var connectedProfiles = await _connectedPublishingProfileRepository.ListByTenantAsync(tenant.TenantId.Value, cancellationToken);
+        var schedulingJob = BuildSchedulingJob(tenant, dailyRequest, primaryAsset, captionAsset, approvalRequest, connectedProfiles);
 
         await _complianceReviewRepository.SaveAsync(complianceReview, cancellationToken);
         await _qualityReviewRepository.SaveAsync(qualityReview, cancellationToken);
@@ -260,7 +264,8 @@ public sealed class ReviewAndScheduleDailyContentUseCase
         DailyContentRequest request,
         PrimaryAsset primaryAsset,
         CaptionAsset captionAsset,
-        ApprovalRequest approvalRequest)
+        ApprovalRequest approvalRequest,
+        IReadOnlyList<ConnectedPublishingProfile> connectedProfiles)
     {
         if (approvalRequest.Status != ApprovalStatus.Approved)
         {
@@ -276,10 +281,20 @@ public sealed class ReviewAndScheduleDailyContentUseCase
 
         var scheduledUtc = NextPublicationWindowUtc(_clock.UtcNow);
         var targets = tenant.Profile.Platforms
-            .Select(platform => new PublicationTarget(
-                platform,
-                scheduledUtc,
-                $"{primaryAsset.PrimaryFormat}: {primaryAsset.Headline} | CTA: {ResolveTargetCallToAction(tenant.Profile, captionAsset.CallToActionKeyword)} | Language: {tenant.Profile.ContentLanguage}"))
+            .Select(platform =>
+            {
+                var providerName = connectedProfiles
+                    .Where(profile => profile.Platform.Equals(platform, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(profile => profile.UpdatedUtc)
+                    .Select(profile => profile.ProviderName)
+                    .FirstOrDefault() ?? string.Empty;
+
+                return new PublicationTarget(
+                    platform,
+                    scheduledUtc,
+                    $"{primaryAsset.PrimaryFormat}: {primaryAsset.Headline} | CTA: {ResolveTargetCallToAction(tenant.Profile, captionAsset.CallToActionKeyword)} | Language: {tenant.Profile.ContentLanguage}",
+                    providerName);
+            })
             .ToArray();
 
         return new SchedulingJob(

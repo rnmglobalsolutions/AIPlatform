@@ -8,7 +8,10 @@ public sealed record ConnectedPublishingProfile(
     string ProviderName,
     string Platform,
     string ExternalProfileId,
-    string AccessToken,
+    string AccessTokenSecretReference,
     string DisplayName,
     DateTime CreatedUtc,
-    DateTime UpdatedUtc);
+    DateTime UpdatedUtc)
+{
+    public bool HasAccessTokenSecret => !string.IsNullOrWhiteSpace(AccessTokenSecretReference);
+}

@@ -18,4 +18,5 @@ public sealed record MonthlyPerformanceSource(
     IReadOnlyList<LeadProfile> LeadProfiles,
     IReadOnlyList<BookingRecord> BookingRecords,
     IReadOnlyList<ReminderSchedule> ReminderSchedules,
-    IReadOnlyList<FollowUpSequence> FollowUpSequences);
+    IReadOnlyList<FollowUpSequence> FollowUpSequences,
+    IReadOnlyList<PublishedContentMetricSnapshot>? PublishedContentMetricSnapshots = null);

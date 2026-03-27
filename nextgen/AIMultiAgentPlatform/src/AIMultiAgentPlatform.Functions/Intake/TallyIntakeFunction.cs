@@ -15,6 +15,7 @@ namespace AIMultiAgentPlatform.Functions.Intake;
 
 public sealed class TallyIntakeFunction(
     ProcessTallySubmissionUseCase useCase,
+    EnqueueProcessTallySubmissionUseCase enqueueUseCase,
     IConfiguration configuration,
     ILogger<TallyIntakeFunction> logger)
 {
@@ -97,6 +98,68 @@ public sealed class TallyIntakeFunction(
             result.Value.BacklogItemCount);
 
         return await FunctionHttp.CreatedAsync(request, result.Value, cancellationToken);
+    }
+
+    [Function("TallyIntakeEnqueue")]
+    public async Task<HttpResponseData> EnqueueAsync(
+        [HttpTrigger(AuthorizationLevel.Function, "post", Route = "api/intake/tally/enqueue")] HttpRequestData request,
+        CancellationToken cancellationToken)
+    {
+        var payloadJson = await FunctionHttp.ReadBodyAsStringAsync(request, cancellationToken);
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            logger.LogWarning("Rejected empty Tally enqueue payload.");
+            return await FunctionHttp.BadRequestAsync(request, "Tally submission could not be enqueued.", "Request body is required.", cancellationToken);
+        }
+
+        var signingSecret = ResolveSigningSecret(configuration);
+        if (!string.IsNullOrWhiteSpace(signingSecret))
+        {
+            if (!TryGetHeaderValue(request, TallySignatureHeaderName, out var providedSignature))
+            {
+                logger.LogWarning("Rejected Tally enqueue because the {HeaderName} header was missing while a signing secret is configured.", TallySignatureHeaderName);
+                return await FunctionHttp.UnauthorizedAsync(request, "Tally signature validation failed.", $"Missing required '{TallySignatureHeaderName}' header.", cancellationToken);
+            }
+
+            if (!IsValidSignature(payloadJson, providedSignature, signingSecret))
+            {
+                logger.LogWarning("Rejected Tally enqueue because the {HeaderName} header did not match the configured signing secret.", TallySignatureHeaderName);
+                return await FunctionHttp.UnauthorizedAsync(request, "Tally signature validation failed.", "The supplied Tally signature is invalid.", cancellationToken);
+            }
+        }
+
+        TallySubmissionRequest? payload;
+        try
+        {
+            payload = FunctionHttp.DeserializeJson<TallySubmissionRequest>(payloadJson);
+        }
+        catch (JsonException)
+        {
+            logger.LogWarning("Rejected Tally enqueue because the payload body was not valid JSON.");
+            return await FunctionHttp.BadRequestAsync(request, "Tally submission could not be enqueued.", "Request body is not valid JSON.", cancellationToken);
+        }
+
+        if (payload is null)
+        {
+            logger.LogWarning("Rejected Tally enqueue because deserialization returned no payload.");
+            return await FunctionHttp.BadRequestAsync(request, "Tally submission could not be enqueued.", "Request body is required.", cancellationToken);
+        }
+
+        var result = await enqueueUseCase.ExecuteAsync(new ProcessTallySubmissionCommand(payload), cancellationToken);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            logger.LogWarning(
+                "Tally enqueue returned a business failure with error code {ErrorCode}.",
+                result.ErrorCode ?? "unknown");
+            return await FunctionHttp.BadRequestAsync(request, "Tally submission could not be enqueued.", Result<object?>.Failure(result.ErrorCode ?? "unknown", result.ErrorMessage ?? "Unknown error."), cancellationToken);
+        }
+
+        logger.LogInformation(
+            "Tally submission {ExternalSubmissionId} was enqueued with message {MessageId}.",
+            payload.ExternalSubmissionId,
+            result.Value.MessageId);
+
+        return await FunctionHttp.AcceptedAsync(request, result.Value, cancellationToken);
     }
 
     private static string? ResolveSigningSecret(IConfiguration configuration)

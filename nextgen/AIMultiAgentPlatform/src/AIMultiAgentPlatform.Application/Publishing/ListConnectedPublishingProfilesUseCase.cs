@@ -42,6 +42,8 @@ public sealed class ListConnectedPublishingProfilesUseCase
                     profile.ProviderName,
                     profile.Platform,
                     profile.ExternalProfileId,
-                    profile.DisplayName)).ToArray()));
+                    profile.DisplayName,
+                    profile.AccessTokenSecretReference,
+                    profile.HasAccessTokenSecret)).ToArray()));
     }
 }

@@ -51,6 +51,47 @@ public sealed class BufferPublishingProviderTests
         Assert.Contains("media%5Bphoto%5D=https%3A%2F%2Fblob.test%2Fvideo.mp4", capturedBody, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ReconcileAsync_ReadsStatusAndStatistics()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            capturedRequest = request;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"status":"sent","service_update_id":"service_123","sent_at":1774620000,"statistics":{"reach":2460,"clicks":56,"favorites":1,"mentions":1,"retweets":20}}""",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        });
+
+        using var httpClient = new HttpClient(handler);
+        var provider = new BufferPublishingProvider(new BufferOptions(true, "https://api.bufferapp.com/1/"), httpClient);
+
+        var result = await provider.ReconcileAsync(
+            new PublishingReconciliationRequest(
+                "tenant_001",
+                "profile_123",
+                "token_123",
+                "Instagram",
+                "buffer_update_123",
+                string.Empty),
+            CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("sent", result.ProviderStatus);
+        Assert.Equal("service_123", result.ExternalUrl);
+        Assert.Equal(2460, result.Metrics.Reach);
+        Assert.Equal(56, result.Metrics.Clicks);
+        Assert.Equal(20, result.Metrics.Shares);
+        Assert.NotNull(capturedRequest);
+        Assert.Equal(HttpMethod.Get, capturedRequest!.Method);
+        Assert.Contains("updates/buffer_update_123.json", capturedRequest.RequestUri!.ToString(), StringComparison.Ordinal);
+        Assert.Contains("access_token=token_123", capturedRequest.RequestUri.ToString(), StringComparison.Ordinal);
+    }
+
     private sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> responder) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

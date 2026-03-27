@@ -22,6 +22,11 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
         var primaryAsset = new PrimaryAsset("primary_asset_001", request.DailyContentRequestId, tenant.TenantId, PrimaryFormat.ShortVideo, "Short video: Authority topic", "Open with the hidden edge. Authority topic.", "HOOK: Open with the hidden edge.\nBODY: Teach the smarter move.\nPAYOFF: Tie it back to the offer.", "Give one next step.", "Invite the audience to comment or DM 'BOOK'.", "15-45 second HeyGen-compatible script. Keep cadence natural, conversational, and easy to subtitle.");
         var caption = new CaptionAsset("caption_001", request.DailyContentRequestId, "Open with the hidden edge. Teach the smarter move. Comment or DM 'BOOK'.", "Ask what is slowing them down.", "BOOK", ["#B2BConsultants"]);
         var bundle = new RepurposedAssetBundle("repurpose_001", request.DailyContentRequestId, "Carousel", ["Frame 1", "Frame 2", "Frame 3"], "LinkedIn post", "Quote", "Clip idea", ["Hook 1", "Hook 2"]);
+        var connectedProfiles = new[]
+        {
+            new ConnectedPublishingProfile("publish_profile_instagram", tenant.TenantId, "Metricool", "Instagram", "ig_profile_001", "publish_secret_metricool", "RNM Instagram", DateTime.UtcNow, DateTime.UtcNow),
+            new ConnectedPublishingProfile("publish_profile_linkedin", tenant.TenantId, "Buffer", "LinkedIn", "li_profile_001", "publish_secret_buffer", "RNM LinkedIn", DateTime.UtcNow, DateTime.UtcNow)
+        };
 
         var useCase = CreateUseCase(
             tenant,
@@ -30,6 +35,7 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
             primaryAsset,
             caption,
             bundle,
+            connectedProfiles,
             out var complianceRepository,
             out var qualityRepository,
             out var approvalRepository,
@@ -53,6 +59,8 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
         Assert.True((qualityRepository.Saved.EvaluationWarnings ?? []).Count <= 2);
         Assert.Equal(ApprovalStatus.Approved, approvalRepository.Saved!.Status);
         Assert.Equal(SchedulingStatus.Scheduled, schedulingRepository.Saved!.Status);
+        Assert.Contains(schedulingRepository.Saved.Targets, target => target.Platform == "Instagram" && target.ProviderName == "Metricool");
+        Assert.Contains(schedulingRepository.Saved.Targets, target => target.Platform == "LinkedIn" && target.ProviderName == "Buffer");
     }
 
     [Fact]
@@ -72,6 +80,7 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
             primaryAsset,
             caption,
             bundle,
+            Array.Empty<ConnectedPublishingProfile>(),
             out _,
             out _,
             out var approvalRepository,
@@ -113,6 +122,7 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
             primaryAsset,
             caption,
             bundle,
+            Array.Empty<ConnectedPublishingProfile>(),
             out _,
             out var qualityRepository,
             out _,
@@ -174,6 +184,7 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
             primaryAsset,
             caption,
             bundle,
+            Array.Empty<ConnectedPublishingProfile>(),
             out _,
             out var qualityRepository,
             out var approvalRepository,
@@ -199,6 +210,7 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
         PrimaryAsset primaryAsset,
         CaptionAsset captionAsset,
         RepurposedAssetBundle bundle,
+        IReadOnlyList<ConnectedPublishingProfile> connectedProfiles,
         out FakeComplianceReviewRepository complianceRepository,
         out FakeQualityReviewRepository qualityRepository,
         out FakeApprovalRequestRepository approvalRepository,
@@ -220,6 +232,7 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
             qualityRepository,
             approvalRepository,
             schedulingRepository,
+            new FakeConnectedPublishingProfileRepository(connectedProfiles),
             new DeterministicIdGenerator(),
             new FixedClock());
     }
@@ -369,5 +382,28 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
 
         public Task<SchedulingJob?> FindByRequestIdAsync(string requestId, CancellationToken cancellationToken) =>
             Task.FromResult(Saved?.DailyContentRequestId == requestId ? Saved : null);
+    }
+
+    private sealed class FakeConnectedPublishingProfileRepository(IReadOnlyList<ConnectedPublishingProfile> profiles) : IConnectedPublishingProfileRepository
+    {
+        public Task SaveAsync(ConnectedPublishingProfile profile, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<ConnectedPublishingProfile?> FindByTenantAndPlatformAsync(string tenantId, string platform, CancellationToken cancellationToken) =>
+            Task.FromResult(profiles
+                .Where(item => item.TenantId.Value == tenantId && item.Platform.Equals(platform, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.UpdatedUtc)
+                .FirstOrDefault());
+
+        public Task<ConnectedPublishingProfile?> FindByTenantPlatformAndProviderAsync(string tenantId, string platform, string providerName, CancellationToken cancellationToken) =>
+            Task.FromResult(profiles
+                .Where(item =>
+                    item.TenantId.Value == tenantId &&
+                    item.Platform.Equals(platform, StringComparison.OrdinalIgnoreCase) &&
+                    item.ProviderName.Equals(providerName, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.UpdatedUtc)
+                .FirstOrDefault());
+
+        public Task<IReadOnlyList<ConnectedPublishingProfile>> ListByTenantAsync(string tenantId, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<ConnectedPublishingProfile>>(profiles.Where(item => item.TenantId.Value == tenantId).ToArray());
     }
 }

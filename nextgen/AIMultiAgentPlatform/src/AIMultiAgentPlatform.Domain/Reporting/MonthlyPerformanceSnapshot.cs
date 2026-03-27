@@ -23,4 +23,11 @@ public sealed record MonthlyPerformanceSnapshot(
     int FollowUpTouchesScheduled,
     double EstimatedEngagement,
     double EstimatedClicks,
-    DateTime GeneratedUtc);
+    DateTime GeneratedUtc,
+    long TotalReach = 0,
+    long TotalClicks = 0,
+    long TotalLikes = 0,
+    long TotalComments = 0,
+    long TotalShares = 0,
+    int AttributedLeads = 0,
+    int AttributedBookings = 0);

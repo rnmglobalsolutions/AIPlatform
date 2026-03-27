@@ -85,6 +85,10 @@ public sealed class ProcessManyChatEventUseCase
         var triggeredFlow = ResolveFlow(finalStage, tenant.Profile);
         var tagsToAdd = ResolveTags(finalStage, ctaKeyword, tenant.Profile);
         var fieldsToUpsert = ResolveFields(finalStage, messageText, ctaKeyword, request.Channel, tenant.Profile);
+        SetIfNotEmpty(fieldsToUpsert, "source_published_content_record_id", request.SourcePublishedContentRecordId);
+        SetIfNotEmpty(fieldsToUpsert, "source_platform", request.SourcePlatform);
+        SetIfNotEmpty(fieldsToUpsert, "source_provider", request.SourceProviderName);
+        SetIfNotEmpty(fieldsToUpsert, "source_external_post_id", request.SourceExternalPostId);
 
         var mergedTags = MergeTags(existingState?.Tags ?? request.CurrentTags, tagsToAdd);
         var mergedFields = MergeFields(existingState?.Fields ?? request.CurrentFields, fieldsToUpsert);
@@ -100,7 +104,11 @@ public sealed class ProcessManyChatEventUseCase
             finalStage,
             BuildIntentSummary(finalStage, ctaKeyword, messageText, tenant.Profile),
             messageText,
-            _clock.UtcNow);
+            _clock.UtcNow,
+            NormalizeValue(request.SourcePublishedContentRecordId, existingLead?.SourcePublishedContentRecordId, string.Empty),
+            NormalizeValue(request.SourcePlatform, existingLead?.SourcePlatform, string.Empty),
+            NormalizeValue(request.SourceProviderName, existingLead?.SourceProviderName, string.Empty),
+            NormalizeValue(request.SourceExternalPostId, existingLead?.SourceExternalPostId, string.Empty));
 
         var contactState = new ManyChatContactState(
             existingState?.ManyChatContactStateId ?? _idGenerator.NewId("manychat_state"),
@@ -171,7 +179,7 @@ public sealed class ProcessManyChatEventUseCase
         _ => ["new-lead"]
     };
 
-    private static IReadOnlyDictionary<string, string> ResolveFields(
+    private static Dictionary<string, string> ResolveFields(
         LeadLifecycleStage stage,
         string messageText,
         string ctaKeyword,
@@ -206,6 +214,14 @@ public sealed class ProcessManyChatEventUseCase
         }
 
         return fields;
+    }
+
+    private static void SetIfNotEmpty(IDictionary<string, string> fields, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            fields[key] = value.Trim();
+        }
     }
 
     private static string BuildIntentSummary(LeadLifecycleStage stage, string ctaKeyword, string messageText, Domain.Tenants.ClientProfile profile) => stage switch

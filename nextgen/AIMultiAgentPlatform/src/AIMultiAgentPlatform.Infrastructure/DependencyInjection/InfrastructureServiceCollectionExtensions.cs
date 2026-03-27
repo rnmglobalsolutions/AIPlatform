@@ -14,7 +14,9 @@ using AIMultiAgentPlatform.Infrastructure.Persistence.TableStorage;
 using AIMultiAgentPlatform.Infrastructure.Persistence.Sql;
 using AIMultiAgentPlatform.Infrastructure.Publishing.InMemory;
 using AIMultiAgentPlatform.Infrastructure.Publishing.Buffer;
+using AIMultiAgentPlatform.Infrastructure.Publishing.Metricool;
 using AIMultiAgentPlatform.Infrastructure.Reporting;
+using AIMultiAgentPlatform.Infrastructure.Security;
 using AIMultiAgentPlatform.Infrastructure.Storage;
 using AIMultiAgentPlatform.Infrastructure.Messaging.InMemory;
 using AIMultiAgentPlatform.Infrastructure.Messaging.ServiceBus;
@@ -24,6 +26,7 @@ using AIMultiAgentPlatform.Infrastructure.Video.InMemory;
 using AIMultiAgentPlatform.Infrastructure.Voice;
 using Azure.Data.Tables;
 using Azure.Messaging.ServiceBus;
+using Azure.Security.KeyVault.Secrets;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -79,24 +82,33 @@ public static class InfrastructureServiceCollectionExtensions
         var heyGenOptions = HeyGenOptions.Resolve(configuration);
         var blobStorageOptions = BlobStorageOptions.Resolve(configuration);
         var bufferOptions = BufferOptions.Resolve(configuration);
+        var metricoolOptions = MetricoolOptions.Resolve(configuration);
         var publicEndpointOptions = PublicEndpointOptions.Resolve(configuration);
+        var keyVaultOptions = KeyVaultOptions.Resolve(configuration);
         var sqlOptions = SqlOptions.Resolve(configuration);
         var serviceBusOptions = ServiceBusOptions.Resolve(configuration);
+        var outboxOptions = OutboxOptions.Resolve(configuration);
         var featureFlags = FeatureFlagOptions.Resolve(configuration);
 
         services.AddSingleton(openAiOptions);
         services.AddSingleton(heyGenOptions);
         services.AddSingleton(blobStorageOptions);
         services.AddSingleton(bufferOptions);
+        services.AddSingleton(metricoolOptions);
         services.AddSingleton(publicEndpointOptions);
+        services.AddSingleton(keyVaultOptions);
         services.AddSingleton(sqlOptions);
         services.AddSingleton(serviceBusOptions);
+        services.AddSingleton(outboxOptions);
         services.AddSingleton(featureFlags);
+        services.AddSingleton<HeuristicReportAgent>();
+        services.AddSingleton<IReportAgent>(sp => sp.GetRequiredService<HeuristicReportAgent>());
         services.AddSingleton<IPublicWebhookUrlResolver, ConfigurationPublicWebhookUrlResolver>();
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IIdGenerator, GuidIdGenerator>();
         services.AddSingleton<ICommandBus, InMemoryCommandBus>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
+        services.AddSingleton<ICommandEnqueuer, DirectCommandEnqueuer>();
         services.AddSingleton<ILLMStrategyPlanner, InMemoryLlmStrategyPlanner>();
         services.AddSingleton<ILLMContentGenerator, InMemoryLlmContentGenerator>();
         services.AddSingleton<IContentGuardrailValidator, PermissiveContentGuardrailValidator>();
@@ -104,11 +116,24 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IVideoAssetStore, InMemoryVideoAssetStore>();
         services.AddSingleton<IWebhookEndpointManager, InMemoryWebhookEndpointManager>();
         services.AddSingleton<IPublishingProvider, InMemoryPublishingProvider>();
+        services.AddSingleton<InMemoryOutboxMessageRepository>();
+        services.AddSingleton<IOutboxMessageRepository>(sp => sp.GetRequiredService<InMemoryOutboxMessageRepository>());
+        services.AddSingleton<InMemoryInboxMessageRepository>();
+        services.AddSingleton<IInboxMessageRepository>(sp => sp.GetRequiredService<InMemoryInboxMessageRepository>());
+        services.AddSingleton<InMemoryPublishingSecretStore>();
 
         if (featureFlags.EnableSocialPublishing && bufferOptions.Enabled)
         {
             services.AddSingleton<BufferPublishingProvider>();
             services.AddSingleton<IPublishingProvider>(sp => sp.GetRequiredService<BufferPublishingProvider>());
+        }
+
+        if (featureFlags.EnableSocialPublishing &&
+            metricoolOptions.Enabled &&
+            metricoolOptions.HasRequiredConfiguration)
+        {
+            services.AddSingleton<MetricoolPublishingProvider>();
+            services.AddSingleton<IPublishingProvider>(sp => sp.GetRequiredService<MetricoolPublishingProvider>());
         }
 
         if (featureFlags.EnableLlmStrategyPlanning &&
@@ -125,6 +150,14 @@ public static class InfrastructureServiceCollectionExtensions
         {
             services.AddSingleton<OpenAiContentGenerator>();
             services.AddSingleton<ILLMContentGenerator>(sp => sp.GetRequiredService<OpenAiContentGenerator>());
+        }
+
+        if (featureFlags.EnableReportAgent &&
+            openAiOptions.Enabled &&
+            openAiOptions.HasRequiredConfiguration)
+        {
+            services.AddSingleton<OpenAiReportAgent>();
+            services.AddSingleton<IReportAgent>(sp => sp.GetRequiredService<OpenAiReportAgent>());
         }
 
         if (featureFlags.EnableVideoGeneration &&
@@ -160,10 +193,12 @@ public static class InfrastructureServiceCollectionExtensions
             }
 
             services.AddTableStorageInfrastructureAdapters(configuration);
-            return services.AddRemainingInMemoryInfrastructureAdapters(skipTenantSlice: true);
+            services.AddRemainingInMemoryInfrastructureAdapters(skipTenantSlice: true);
+            return services.AddKeyVaultPublishingSecretStoreIfConfigured(configuration);
         }
 
-        return services.AddInMemoryInfrastructureAdapters();
+        services.AddInMemoryInfrastructureAdapters();
+        return services.AddKeyVaultPublishingSecretStoreIfConfigured(configuration);
     }
 
     private static IServiceCollection AddProductionInfrastructure(
@@ -171,7 +206,11 @@ public static class InfrastructureServiceCollectionExtensions
         InfrastructureModeSettings settings,
         IConfiguration? configuration)
     {
+        services.AddInMemoryInfrastructureAdapters();
+
         var productionOptions = ProductionInfrastructureOptions.Disabled;
+        var sqlOptions = SqlOptions.Resolve(configuration);
+        var serviceBusOptions = ServiceBusOptions.Resolve(configuration);
 
         if (settings.PersistenceMode == PersistenceMode.Sql)
         {
@@ -185,8 +224,23 @@ public static class InfrastructureServiceCollectionExtensions
             productionOptions = productionOptions with { ServiceBusSkeletonEnabled = true };
         }
 
+        if (productionOptions.SqlSkeletonEnabled &&
+            productionOptions.ServiceBusSkeletonEnabled &&
+            sqlOptions.Enabled &&
+            sqlOptions.HasRequiredConfiguration &&
+            serviceBusOptions.Enabled &&
+            serviceBusOptions.HasRequiredConfiguration)
+        {
+            services.AddScoped<SqlOutboxMessageRepository>();
+            services.AddScoped<IOutboxMessageRepository>(sp => sp.GetRequiredService<SqlOutboxMessageRepository>());
+            services.AddScoped<SqlInboxMessageRepository>();
+            services.AddScoped<IInboxMessageRepository>(sp => sp.GetRequiredService<SqlInboxMessageRepository>());
+            services.AddScoped<ICommandEnqueuer, SqlOutboxCommandEnqueuer>();
+            productionOptions = productionOptions with { CommandOutboxEnabled = true };
+        }
+
         services.AddSingleton(productionOptions);
-        return services.AddInMemoryInfrastructureAdapters();
+        return services.AddKeyVaultPublishingSecretStoreIfConfigured(configuration);
     }
 
     private static IServiceCollection AddSqlInfrastructureSkeleton(
@@ -208,6 +262,25 @@ public static class InfrastructureServiceCollectionExtensions
                 sqlServerOptions => sqlServerOptions.CommandTimeout(sqlOptions.CommandTimeoutSeconds));
         });
 
+        services.AddSqlCriticalPathRepositories();
+
+        return services;
+    }
+
+    private static IServiceCollection AddKeyVaultPublishingSecretStoreIfConfigured(
+        this IServiceCollection services,
+        IConfiguration? configuration)
+    {
+        var keyVaultOptions = KeyVaultOptions.Resolve(configuration);
+        if (!keyVaultOptions.Enabled || !keyVaultOptions.HasRequiredConfiguration)
+        {
+            return services;
+        }
+
+        services.AddSingleton(keyVaultOptions);
+        services.AddSingleton(sp => AzureKeyVaultPublishingSecretStore.CreateSecretClient(sp.GetRequiredService<KeyVaultOptions>()));
+        services.AddSingleton<AzureKeyVaultPublishingSecretStore>();
+        services.AddSingleton<IPublishingSecretStore>(sp => sp.GetRequiredService<AzureKeyVaultPublishingSecretStore>());
         return services;
     }
 
@@ -228,6 +301,67 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ICommandBus>(sp => sp.GetRequiredService<ServiceBusCommandBus>());
         services.AddSingleton<ServiceBusEventBus>();
         services.AddSingleton<IEventBus>(sp => sp.GetRequiredService<ServiceBusEventBus>());
+
+        return services;
+    }
+
+    private static IServiceCollection AddSqlCriticalPathRepositories(this IServiceCollection services)
+    {
+        services.AddScoped<SqlTenantRepository>();
+        services.AddScoped<ITenantRepository>(sp => sp.GetRequiredService<SqlTenantRepository>());
+        services.AddScoped<SqlTallySubmissionReceiptRepository>();
+        services.AddScoped<ITallySubmissionReceiptRepository>(sp => sp.GetRequiredService<SqlTallySubmissionReceiptRepository>());
+        services.AddScoped<SqlStrategyPlanRepository>();
+        services.AddScoped<IStrategyPlanRepository>(sp => sp.GetRequiredService<SqlStrategyPlanRepository>());
+        services.AddScoped<SqlEditorialBacklogRepository>();
+        services.AddScoped<IEditorialBacklogRepository>(sp => sp.GetRequiredService<SqlEditorialBacklogRepository>());
+        services.AddScoped<SqlContentMemoryRepository>();
+        services.AddScoped<IContentMemoryRepository>(sp => sp.GetRequiredService<SqlContentMemoryRepository>());
+        services.AddScoped<SqlDailyContentRequestRepository>();
+        services.AddScoped<IDailyContentRequestRepository>(sp => sp.GetRequiredService<SqlDailyContentRequestRepository>());
+        services.AddScoped<SqlDailyContentBriefRepository>();
+        services.AddScoped<IDailyContentBriefRepository>(sp => sp.GetRequiredService<SqlDailyContentBriefRepository>());
+        services.AddScoped<SqlPrimaryAssetRepository>();
+        services.AddScoped<IPrimaryAssetRepository>(sp => sp.GetRequiredService<SqlPrimaryAssetRepository>());
+        services.AddScoped<SqlCaptionAssetRepository>();
+        services.AddScoped<ICaptionAssetRepository>(sp => sp.GetRequiredService<SqlCaptionAssetRepository>());
+        services.AddScoped<SqlRepurposedAssetBundleRepository>();
+        services.AddScoped<IRepurposedAssetBundleRepository>(sp => sp.GetRequiredService<SqlRepurposedAssetBundleRepository>());
+        services.AddScoped<SqlVideoGenerationJobRepository>();
+        services.AddScoped<IVideoGenerationJobRepository>(sp => sp.GetRequiredService<SqlVideoGenerationJobRepository>());
+        services.AddScoped<SqlGeneratedVideoAssetRepository>();
+        services.AddScoped<IGeneratedVideoAssetRepository>(sp => sp.GetRequiredService<SqlGeneratedVideoAssetRepository>());
+        services.AddScoped<SqlVideoWebhookEndpointRegistrationRepository>();
+        services.AddScoped<IVideoWebhookEndpointRegistrationRepository>(sp => sp.GetRequiredService<SqlVideoWebhookEndpointRegistrationRepository>());
+        services.AddScoped<SqlComplianceReviewRepository>();
+        services.AddScoped<IComplianceReviewRepository>(sp => sp.GetRequiredService<SqlComplianceReviewRepository>());
+        services.AddScoped<SqlQualityReviewRepository>();
+        services.AddScoped<IQualityReviewRepository>(sp => sp.GetRequiredService<SqlQualityReviewRepository>());
+        services.AddScoped<SqlApprovalRequestRepository>();
+        services.AddScoped<IApprovalRequestRepository>(sp => sp.GetRequiredService<SqlApprovalRequestRepository>());
+        services.AddScoped<SqlSchedulingJobRepository>();
+        services.AddScoped<ISchedulingJobRepository>(sp => sp.GetRequiredService<SqlSchedulingJobRepository>());
+        services.AddScoped<SqlConnectedPublishingProfileRepository>();
+        services.AddScoped<IConnectedPublishingProfileRepository>(sp => sp.GetRequiredService<SqlConnectedPublishingProfileRepository>());
+        services.AddScoped<SqlPublishedContentRecordRepository>();
+        services.AddScoped<IPublishedContentRecordRepository>(sp => sp.GetRequiredService<SqlPublishedContentRecordRepository>());
+        services.AddScoped<SqlPublishedContentMetricSnapshotRepository>();
+        services.AddScoped<IPublishedContentMetricSnapshotRepository>(sp => sp.GetRequiredService<SqlPublishedContentMetricSnapshotRepository>());
+        services.AddScoped<SqlLeadProfileRepository>();
+        services.AddScoped<ILeadProfileRepository>(sp => sp.GetRequiredService<SqlLeadProfileRepository>());
+        services.AddScoped<SqlManyChatContactStateRepository>();
+        services.AddScoped<IManyChatContactStateRepository>(sp => sp.GetRequiredService<SqlManyChatContactStateRepository>());
+        services.AddScoped<SqlBookingRecordRepository>();
+        services.AddScoped<IBookingRecordRepository>(sp => sp.GetRequiredService<SqlBookingRecordRepository>());
+        services.AddScoped<SqlReminderScheduleRepository>();
+        services.AddScoped<IReminderScheduleRepository>(sp => sp.GetRequiredService<SqlReminderScheduleRepository>());
+        services.AddScoped<SqlFollowUpSequenceRepository>();
+        services.AddScoped<IFollowUpSequenceRepository>(sp => sp.GetRequiredService<SqlFollowUpSequenceRepository>());
+        services.AddScoped<SqlVoiceCallSessionRepository>();
+        services.AddScoped<IVoiceCallSessionRepository>(sp => sp.GetRequiredService<SqlVoiceCallSessionRepository>());
+        services.AddScoped<SqlMonthlyPerformanceSnapshotRepository>();
+        services.AddScoped<IMonthlyPerformanceSnapshotRepository>(sp => sp.GetRequiredService<SqlMonthlyPerformanceSnapshotRepository>());
+        services.AddScoped<IMonthlyPerformanceReadService, SqlMonthlyPerformanceReadService>();
 
         return services;
     }
@@ -270,8 +404,12 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ISchedulingJobRepository>(sp => sp.GetRequiredService<InMemorySchedulingJobRepository>());
         services.AddSingleton<InMemoryConnectedPublishingProfileRepository>();
         services.AddSingleton<IConnectedPublishingProfileRepository>(sp => sp.GetRequiredService<InMemoryConnectedPublishingProfileRepository>());
+        services.AddSingleton<InMemoryPublishingSecretStore>();
+        services.AddSingleton<IPublishingSecretStore>(sp => sp.GetRequiredService<InMemoryPublishingSecretStore>());
         services.AddSingleton<InMemoryPublishedContentRecordRepository>();
         services.AddSingleton<IPublishedContentRecordRepository>(sp => sp.GetRequiredService<InMemoryPublishedContentRecordRepository>());
+        services.AddSingleton<InMemoryPublishedContentMetricSnapshotRepository>();
+        services.AddSingleton<IPublishedContentMetricSnapshotRepository>(sp => sp.GetRequiredService<InMemoryPublishedContentMetricSnapshotRepository>());
         services.AddSingleton<InMemoryLeadProfileRepository>();
         services.AddSingleton<ILeadProfileRepository>(sp => sp.GetRequiredService<InMemoryLeadProfileRepository>());
         services.AddSingleton<InMemoryManyChatContactStateRepository>();
@@ -363,8 +501,12 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ISchedulingJobRepository>(sp => sp.GetRequiredService<InMemorySchedulingJobRepository>());
         services.AddSingleton<InMemoryConnectedPublishingProfileRepository>();
         services.AddSingleton<IConnectedPublishingProfileRepository>(sp => sp.GetRequiredService<InMemoryConnectedPublishingProfileRepository>());
+        services.AddSingleton<InMemoryPublishingSecretStore>();
+        services.AddSingleton<IPublishingSecretStore>(sp => sp.GetRequiredService<InMemoryPublishingSecretStore>());
         services.AddSingleton<InMemoryPublishedContentRecordRepository>();
         services.AddSingleton<IPublishedContentRecordRepository>(sp => sp.GetRequiredService<InMemoryPublishedContentRecordRepository>());
+        services.AddSingleton<InMemoryPublishedContentMetricSnapshotRepository>();
+        services.AddSingleton<IPublishedContentMetricSnapshotRepository>(sp => sp.GetRequiredService<InMemoryPublishedContentMetricSnapshotRepository>());
         services.AddSingleton<InMemoryLeadProfileRepository>();
         services.AddSingleton<ILeadProfileRepository>(sp => sp.GetRequiredService<InMemoryLeadProfileRepository>());
         services.AddSingleton<InMemoryManyChatContactStateRepository>();

@@ -14,8 +14,14 @@ public sealed class InMemoryPublishedContentRecordRepository : IPublishedContent
         return Task.CompletedTask;
     }
 
+    public Task<PublishedContentRecord?> FindByIdAsync(string publishedContentRecordId, CancellationToken cancellationToken) =>
+        Task.FromResult(_items.TryGetValue(publishedContentRecordId, out var record) ? record : null);
+
     public Task<IReadOnlyList<PublishedContentRecord>> FindByRequestIdAsync(string dailyContentRequestId, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<PublishedContentRecord>>(_items.Values.Where(item => item.DailyContentRequestId == dailyContentRequestId).ToArray());
+
+    public Task<IReadOnlyList<PublishedContentRecord>> FindBySchedulingJobIdAsync(string schedulingJobId, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<PublishedContentRecord>>(_items.Values.Where(item => item.SchedulingJobId == schedulingJobId).ToArray());
 
     public IReadOnlyList<PublishedContentRecord> ListAll() => _items.Values.ToArray();
 }

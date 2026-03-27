@@ -11,4 +11,7 @@ public sealed record BookingRecord(
     string CalendlyUrl,
     string EventType,
     DateTime? AppointmentUtc,
-    DateTime UpdatedUtc);
+    DateTime UpdatedUtc,
+    string AttributedPublishedContentRecordId = "",
+    string AttributedPlatform = "",
+    string AttributedProviderName = "");

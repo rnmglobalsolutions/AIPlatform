@@ -16,6 +16,7 @@ public sealed class PublishScheduledContentUseCase
     private readonly ICaptionAssetRepository _captionAssetRepository;
     private readonly IGeneratedVideoAssetRepository _generatedVideoAssetRepository;
     private readonly IConnectedPublishingProfileRepository _connectedPublishingProfileRepository;
+    private readonly IPublishingSecretStore _publishingSecretStore;
     private readonly IPublishedContentRecordRepository _publishedContentRecordRepository;
     private readonly IPublishingProviderSelector _publishingProviderSelector;
     private readonly IIdGenerator _idGenerator;
@@ -28,6 +29,7 @@ public sealed class PublishScheduledContentUseCase
         ICaptionAssetRepository captionAssetRepository,
         IGeneratedVideoAssetRepository generatedVideoAssetRepository,
         IConnectedPublishingProfileRepository connectedPublishingProfileRepository,
+        IPublishingSecretStore publishingSecretStore,
         IPublishedContentRecordRepository publishedContentRecordRepository,
         IPublishingProviderSelector publishingProviderSelector,
         IIdGenerator idGenerator,
@@ -39,11 +41,17 @@ public sealed class PublishScheduledContentUseCase
         _captionAssetRepository = captionAssetRepository;
         _generatedVideoAssetRepository = generatedVideoAssetRepository;
         _connectedPublishingProfileRepository = connectedPublishingProfileRepository;
+        _publishingSecretStore = publishingSecretStore;
         _publishedContentRecordRepository = publishedContentRecordRepository;
         _publishingProviderSelector = publishingProviderSelector;
         _idGenerator = idGenerator;
         _clock = clock;
     }
+
+    public async Task<Result<PublishScheduledContentResponse>> ExecuteAsync(
+        PublishScheduledContentCommand command,
+        CancellationToken cancellationToken) =>
+        await ExecuteAsync(command.Request, cancellationToken);
 
     public async Task<Result<PublishScheduledContentResponse>> ExecuteAsync(
         PublishScheduledContentRequest request,
@@ -93,10 +101,26 @@ public sealed class PublishScheduledContentUseCase
 
         foreach (var target in schedulingJob.Targets)
         {
-            var connectedProfile = await _connectedPublishingProfileRepository.FindByTenantAndPlatformAsync(tenant.TenantId.Value, target.Platform, cancellationToken);
+            ConnectedPublishingProfile? connectedProfile;
+            if (!string.IsNullOrWhiteSpace(target.ProviderName))
+            {
+                connectedProfile = await _connectedPublishingProfileRepository.FindByTenantPlatformAndProviderAsync(
+                    tenant.TenantId.Value,
+                    target.Platform,
+                    target.ProviderName,
+                    cancellationToken);
+            }
+            else
+            {
+                connectedProfile = await _connectedPublishingProfileRepository.FindByTenantAndPlatformAsync(tenant.TenantId.Value, target.Platform, cancellationToken);
+            }
+
             if (connectedProfile is null)
             {
-                await SaveRecordAsync(tenant.TenantId, schedulingJob, target, primaryAsset, captionAsset, null, ResolveAssetUrl(primaryAsset, generatedVideoAsset), PublishedContentStatus.Failed, string.Empty, string.Empty, "No connected publishing profile was found for the target platform.", cancellationToken);
+                var message = string.IsNullOrWhiteSpace(target.ProviderName)
+                    ? "No connected publishing profile was found for the target platform."
+                    : $"No connected publishing profile was found for platform '{target.Platform}' and provider '{target.ProviderName}'.";
+                await SaveRecordAsync(tenant.TenantId, schedulingJob, target, primaryAsset, captionAsset, null, ResolveAssetUrl(primaryAsset, generatedVideoAsset), PublishedContentStatus.Failed, string.Empty, string.Empty, message, cancellationToken);
                 failedCount++;
                 continue;
             }
@@ -109,13 +133,21 @@ public sealed class PublishScheduledContentUseCase
                 continue;
             }
 
+            var accessToken = await _publishingSecretStore.GetAccessTokenAsync(connectedProfile.AccessTokenSecretReference, cancellationToken);
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                await SaveRecordAsync(tenant.TenantId, schedulingJob, target, primaryAsset, captionAsset, connectedProfile, ResolveAssetUrl(primaryAsset, generatedVideoAsset), PublishedContentStatus.Failed, string.Empty, string.Empty, $"Publishing access token secret '{connectedProfile.AccessTokenSecretReference}' could not be resolved.", cancellationToken);
+                failedCount++;
+                continue;
+            }
+
             var assetUrl = ResolveAssetUrl(primaryAsset, generatedVideoAsset);
             var result = await provider.PublishAsync(
                 new PublishingRequest(
                     tenant.TenantId.Value,
                     schedulingJob.SchedulingJobId,
                     connectedProfile.ExternalProfileId,
-                    connectedProfile.AccessToken,
+                    accessToken,
                     target.Platform,
                     captionAsset.Caption,
                     assetUrl,
@@ -183,7 +215,7 @@ public sealed class PublishScheduledContentUseCase
                 schedulingJob.DailyContentRequestId,
                 schedulingJob.SchedulingJobId,
                 tenantId,
-                connectedProfile?.ProviderName ?? "Unknown",
+                connectedProfile?.ProviderName ?? (string.IsNullOrWhiteSpace(target.ProviderName) ? "Unknown" : target.ProviderName),
                 target.Platform,
                 connectedProfile?.ExternalProfileId ?? string.Empty,
                 externalPostId,

@@ -78,6 +78,54 @@ public sealed class BufferPublishingProvider : IPublishingProvider, IDisposable
         }
     }
 
+    public async Task<PublishingReconciliationResult> ReconcileAsync(PublishingReconciliationRequest request, CancellationToken cancellationToken)
+    {
+        if (!_options.Enabled)
+        {
+            return PublishingReconciliationResult.Failure(request.Platform, "Buffer publishing is disabled in the current environment.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.AccessToken) || string.IsNullOrWhiteSpace(request.ExternalPostId))
+        {
+            return PublishingReconciliationResult.Failure(request.Platform, "Buffer reconciliation requires an access token and external post id.");
+        }
+
+        var requestUri = $"updates/{Uri.EscapeDataString(request.ExternalPostId)}.json?access_token={Uri.EscapeDataString(request.AccessToken)}";
+        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+        var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return PublishingReconciliationResult.Failure(request.Platform, $"Buffer returned {(int)response.StatusCode}: {Truncate(responseJson, 400)}");
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(responseJson);
+            var root = document.RootElement;
+            var providerStatus = root.TryGetProperty("status", out var statusElement)
+                ? statusElement.GetString() ?? string.Empty
+                : string.Empty;
+            var externalUrl = root.TryGetProperty("service_update_id", out var serviceUpdateIdElement) && !string.IsNullOrWhiteSpace(serviceUpdateIdElement.GetString())
+                ? serviceUpdateIdElement.GetString()!
+                : request.ExistingExternalUrl;
+            var metrics = ParseMetrics(root);
+            DateTime? publishedUtc = root.TryGetProperty("sent_at", out var sentAtElement) && sentAtElement.TryGetInt64(out var sentAtUnix)
+                ? DateTimeOffset.FromUnixTimeSeconds(sentAtUnix).UtcDateTime
+                : null;
+
+            return PublishingReconciliationResult.Success(
+                request.Platform,
+                providerStatus,
+                externalUrl,
+                metrics,
+                publishedUtc);
+        }
+        catch (JsonException exception)
+        {
+            return PublishingReconciliationResult.Failure(request.Platform, $"Buffer reconciliation response could not be parsed: {exception.Message}");
+        }
+    }
+
     public void Dispose()
     {
         if (_ownsHttpClient)
@@ -132,4 +180,34 @@ public sealed class BufferPublishingProvider : IPublishingProvider, IDisposable
 
     private static string Truncate(string value, int maxLength) =>
         string.IsNullOrWhiteSpace(value) || value.Length <= maxLength ? value : value[..maxLength];
+
+    private static PublishingMetrics ParseMetrics(JsonElement root)
+    {
+        if (!root.TryGetProperty("statistics", out var statistics) || statistics.ValueKind != JsonValueKind.Object)
+        {
+            return new PublishingMetrics(0, 0, 0, 0, 0);
+        }
+
+        return new PublishingMetrics(
+            ReadLong(statistics, "reach"),
+            ReadLong(statistics, "clicks"),
+            Math.Max(ReadLong(statistics, "likes"), ReadLong(statistics, "favorites")),
+            Math.Max(ReadLong(statistics, "comments"), ReadLong(statistics, "mentions")),
+            Math.Max(ReadLong(statistics, "shares"), ReadLong(statistics, "retweets")));
+    }
+
+    private static long ReadLong(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return 0;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetInt64(out var number) => number,
+            JsonValueKind.String when long.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => 0
+        };
+    }
 }

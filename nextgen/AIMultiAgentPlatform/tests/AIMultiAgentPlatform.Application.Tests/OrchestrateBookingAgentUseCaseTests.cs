@@ -51,6 +51,8 @@ public sealed class OrchestrateBookingAgentUseCaseTests
         Assert.NotNull(result.Value.ReminderScheduleId);
         Assert.Null(result.Value.FollowUpSequenceId);
         Assert.Equal(BookingStatus.Booked, bookingRepository.Saved!.Status);
+        Assert.Equal("published_001", bookingRepository.Saved.AttributedPublishedContentRecordId);
+        Assert.Equal("Instagram", bookingRepository.Saved.AttributedPlatform);
         Assert.Equal(ReminderScheduleStatus.Scheduled, reminderRepository.Saved!.Status);
         Assert.Equal(4, reminderRepository.Saved.Touches.Count);
         Assert.Null(followUpRepository.Saved);
@@ -164,7 +166,11 @@ public sealed class OrchestrateBookingAgentUseCaseTests
             stage,
             "Intent summary",
             "latest message",
-            new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc));
+            new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc),
+            "published_001",
+            "Instagram",
+            "Buffer",
+            "post_001");
 
     private static ManyChatContactState CreateState(TenantId tenantId, string contactId) =>
         new(

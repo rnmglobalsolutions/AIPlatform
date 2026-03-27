@@ -8,5 +8,5 @@ public sealed class SqlInboxMessageEntity
     public string TenantId { get; set; } = string.Empty;
     public string PayloadJson { get; set; } = string.Empty;
     public DateTime ReceivedUtc { get; set; }
-    public DateTime ProcessedUtc { get; set; }
+    public DateTime? ProcessedUtc { get; set; }
 }

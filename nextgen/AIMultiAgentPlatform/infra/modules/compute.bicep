@@ -4,6 +4,7 @@ param appServicePlanSku object
 param apiAppName string
 param workerFunctionAppName string
 param managedIdentityResourceId string
+param managedIdentityClientId string
 param storageAccountName string
 param appInsightsConnectionString string
 param keyVaultUri string
@@ -133,8 +134,16 @@ resource apiWebApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
           value: appInsightsConnectionString
         }
         {
+          name: 'KeyVault__Enabled'
+          value: 'true'
+        }
+        {
           name: 'KeyVault__VaultUri'
           value: keyVaultUri
+        }
+        {
+          name: 'KeyVault__ManagedIdentityClientId'
+          value: managedIdentityClientId
         }
         {
           name: 'TallyWebhook__SigningSecret'
@@ -273,8 +282,16 @@ resource leanFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (isLean) {
           value: appInsightsConnectionString
         }
         {
+          name: 'KeyVault__Enabled'
+          value: 'true'
+        }
+        {
           name: 'KeyVault__VaultUri'
           value: keyVaultUri
+        }
+        {
+          name: 'KeyVault__ManagedIdentityClientId'
+          value: managedIdentityClientId
         }
         {
           name: 'TallyWebhook__SigningSecret'
@@ -376,8 +393,16 @@ resource productionFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
           value: appInsightsConnectionString
         }
         {
+          name: 'KeyVault__Enabled'
+          value: 'true'
+        }
+        {
           name: 'KeyVault__VaultUri'
           value: keyVaultUri
+        }
+        {
+          name: 'KeyVault__ManagedIdentityClientId'
+          value: managedIdentityClientId
         }
         {
           name: 'TallyWebhook__SigningSecret'

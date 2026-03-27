@@ -45,6 +45,13 @@ internal static class FunctionHttp
         return response;
     }
 
+    public static async Task<HttpResponseData> AcceptedAsync<T>(HttpRequestData request, T payload, CancellationToken cancellationToken)
+    {
+        var response = request.CreateResponse(HttpStatusCode.Accepted);
+        await WriteJsonAsync(response, payload, cancellationToken);
+        return response;
+    }
+
     public static async Task<HttpResponseData> BadRequestAsync(
         HttpRequestData request,
         string title,

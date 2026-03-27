@@ -24,7 +24,7 @@ public sealed class PublishScheduledContentUseCaseTests
             SchedulingStatus.Scheduled,
             "Scheduled",
             new DateTime(2026, 03, 27, 12, 0, 0, DateTimeKind.Utc),
-            [new PublicationTarget("Instagram", new DateTime(2026, 03, 27, 14, 0, 0, DateTimeKind.Utc), "Payload")]);
+            [new PublicationTarget("Instagram", new DateTime(2026, 03, 27, 14, 0, 0, DateTimeKind.Utc), "Payload", "Buffer")]);
         var primaryAsset = new PrimaryAsset(
             "primary_asset_001",
             "daily_request_001",
@@ -38,8 +38,9 @@ public sealed class PublishScheduledContentUseCaseTests
             "Notes");
         var captionAsset = new CaptionAsset("caption_001", "daily_request_001", "Caption copy", "Prompt", "BOOK", ["#Test"]);
         var videoAsset = new GeneratedVideoAsset("video_asset_001", "video_job_001", "daily_request_001", tenant.TenantId, "primary_asset_001", "HeyGen", "provider_job_001", "Title", "https://provider.test/video.mp4", "https://blob.test/video.mp4", "Transcript", "English", "9:16", DateTime.UtcNow);
-        var connectedProfile = new ConnectedPublishingProfile("publish_profile_001", tenant.TenantId, "Buffer", "Instagram", "buffer_profile_123", "token_123", "RNM Instagram", DateTime.UtcNow, DateTime.UtcNow);
+        var connectedProfile = new ConnectedPublishingProfile("publish_profile_001", tenant.TenantId, "Buffer", "Instagram", "buffer_profile_123", "publish_secret_buffer", "RNM Instagram", DateTime.UtcNow, DateTime.UtcNow);
         var publishedRecordRepository = new FakePublishedContentRecordRepository();
+        var secretStore = new FakePublishingSecretStore(("publish_secret_buffer", "token_123"));
 
         var useCase = new PublishScheduledContentUseCase(
             new FakeTenantRepository(tenant),
@@ -48,6 +49,7 @@ public sealed class PublishScheduledContentUseCaseTests
             new FakeCaptionAssetRepository(captionAsset),
             new FakeGeneratedVideoAssetRepository(videoAsset),
             new FakeConnectedPublishingProfileRepository(connectedProfile),
+            secretStore,
             publishedRecordRepository,
             new FixedPublishingProviderSelector(new FakePublishingProvider(PublishingResult.Success("Instagram", "post_123", ""))),
             new DeterministicIdGenerator(),
@@ -131,8 +133,29 @@ public sealed class PublishScheduledContentUseCaseTests
         public Task SaveAsync(ConnectedPublishingProfile profile, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<ConnectedPublishingProfile?> FindByTenantAndPlatformAsync(string tenantId, string platform, CancellationToken cancellationToken) =>
             Task.FromResult(profile.TenantId.Value == tenantId && profile.Platform.Equals(platform, StringComparison.OrdinalIgnoreCase) ? profile : null);
+        public Task<ConnectedPublishingProfile?> FindByTenantPlatformAndProviderAsync(string tenantId, string platform, string providerName, CancellationToken cancellationToken) =>
+            Task.FromResult(
+                profile.TenantId.Value == tenantId &&
+                profile.Platform.Equals(platform, StringComparison.OrdinalIgnoreCase) &&
+                profile.ProviderName.Equals(providerName, StringComparison.OrdinalIgnoreCase)
+                    ? profile
+                    : null);
         public Task<IReadOnlyList<ConnectedPublishingProfile>> ListByTenantAsync(string tenantId, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<ConnectedPublishingProfile>>(profile.TenantId.Value == tenantId ? [profile] : Array.Empty<ConnectedPublishingProfile>());
+    }
+
+    private sealed class FakePublishingSecretStore(params (string SecretReference, string AccessToken)[] entries) : IPublishingSecretStore
+    {
+        private readonly Dictionary<string, string> _items = entries.ToDictionary(item => item.SecretReference, item => item.AccessToken, StringComparer.Ordinal);
+
+        public Task SaveAccessTokenAsync(PublishingAccessTokenSecret secret, CancellationToken cancellationToken)
+        {
+            _items[secret.SecretReference] = secret.AccessToken;
+            return Task.CompletedTask;
+        }
+
+        public Task<string?> GetAccessTokenAsync(string secretReference, CancellationToken cancellationToken) =>
+            Task.FromResult(_items.TryGetValue(secretReference, out var accessToken) ? accessToken : null);
     }
 
     private sealed class FakePublishedContentRecordRepository : IPublishedContentRecordRepository
@@ -140,11 +163,16 @@ public sealed class PublishScheduledContentUseCaseTests
         public List<PublishedContentRecord> Saved { get; } = [];
         public Task SaveAsync(PublishedContentRecord record, CancellationToken cancellationToken)
         {
+            Saved.RemoveAll(item => item.PublishedContentRecordId == record.PublishedContentRecordId);
             Saved.Add(record);
             return Task.CompletedTask;
         }
+        public Task<PublishedContentRecord?> FindByIdAsync(string publishedContentRecordId, CancellationToken cancellationToken) =>
+            Task.FromResult(Saved.SingleOrDefault(item => item.PublishedContentRecordId == publishedContentRecordId));
         public Task<IReadOnlyList<PublishedContentRecord>> FindByRequestIdAsync(string dailyContentRequestId, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<PublishedContentRecord>>(Saved.Where(item => item.DailyContentRequestId == dailyContentRequestId).ToArray());
+        public Task<IReadOnlyList<PublishedContentRecord>> FindBySchedulingJobIdAsync(string schedulingJobId, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<PublishedContentRecord>>(Saved.Where(item => item.SchedulingJobId == schedulingJobId).ToArray());
     }
 
     private sealed class FakePublishingProvider(PublishingResult result) : IPublishingProvider

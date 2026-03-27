@@ -123,9 +123,10 @@ public sealed class ProcessManyChatEventUseCaseTests
     public async Task ExecuteAsync_IncludesWebsiteUrlWhenTenantHasWebsite()
     {
         var tenant = CreateTenant(websiteUrl: "https://rnmgrowth.com");
+        var leadRepository = new FakeLeadProfileRepository();
         var useCase = new ProcessManyChatEventUseCase(
             new FakeTenantRepository(tenant),
-            new FakeLeadProfileRepository(),
+            leadRepository,
             new FakeManyChatContactStateRepository(),
             new DeterministicIdGenerator(),
             new FixedClock());
@@ -140,11 +141,18 @@ public sealed class ProcessManyChatEventUseCaseTests
                     "Tell me more",
                     "Jane",
                     "Doe",
-                    "jane@rnm.test")),
+                    "jane@rnm.test",
+                    SourcePublishedContentRecordId: "published_001",
+                    SourcePlatform: "Instagram",
+                    SourceProviderName: "Buffer",
+                    SourceExternalPostId: "post_001")),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.Equal("https://rnmgrowth.com", result.Value!.FieldsToUpsert["website_url"]);
+        Assert.Equal("published_001", leadRepository.Saved!.SourcePublishedContentRecordId);
+        Assert.Equal("Instagram", leadRepository.Saved.SourcePlatform);
+        Assert.Equal("Buffer", leadRepository.Saved.SourceProviderName);
     }
 
     private static Tenant CreateTenant(

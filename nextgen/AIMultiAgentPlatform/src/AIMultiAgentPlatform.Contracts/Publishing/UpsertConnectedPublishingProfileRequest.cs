@@ -5,5 +5,6 @@ public sealed record UpsertConnectedPublishingProfileRequest(
     string ProviderName,
     string Platform,
     string ExternalProfileId,
-    string AccessToken,
-    string DisplayName);
+    string? AccessToken,
+    string DisplayName,
+    string? AccessTokenSecretReference = null);

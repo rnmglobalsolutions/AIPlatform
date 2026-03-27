@@ -11,4 +11,8 @@ public sealed record ProcessManyChatEventRequest(
     string? Email = null,
     IReadOnlyList<string>? CurrentTags = null,
     IReadOnlyDictionary<string, string>? CurrentFields = null,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    string? SourcePublishedContentRecordId = null,
+    string? SourcePlatform = null,
+    string? SourceProviderName = null,
+    string? SourceExternalPostId = null);

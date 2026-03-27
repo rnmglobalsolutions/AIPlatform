@@ -13,4 +13,8 @@ public sealed record LeadProfile(
     LeadLifecycleStage CurrentStage,
     string IntentSummary,
     string LastMessageText,
-    DateTime UpdatedUtc);
+    DateTime UpdatedUtc,
+    string SourcePublishedContentRecordId = "",
+    string SourcePlatform = "",
+    string SourceProviderName = "",
+    string SourceExternalPostId = "");
