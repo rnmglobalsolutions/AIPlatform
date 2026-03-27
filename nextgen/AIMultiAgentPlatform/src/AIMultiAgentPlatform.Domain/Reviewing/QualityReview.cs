@@ -13,4 +13,8 @@ public sealed record QualityReview(
     double OverallScore,
     string Feedback,
     string OptimizedCallToAction,
-    DateTime ReviewedUtc);
+    DateTime ReviewedUtc,
+    double SpecificityScore = 0,
+    double PlatformFitScore = 0,
+    double AntiRepetitionScore = 0,
+    IReadOnlyList<string>? EvaluationWarnings = null);

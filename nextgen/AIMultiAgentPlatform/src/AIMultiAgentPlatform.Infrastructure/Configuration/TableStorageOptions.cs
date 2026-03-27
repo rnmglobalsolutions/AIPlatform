@@ -7,7 +7,9 @@ public sealed record TableStorageOptions(
     string TenantTableName,
     string StrategyPlanTableName,
     string EditorialBacklogTableName,
-    string TallySubmissionReceiptTableName)
+    string TallySubmissionReceiptTableName,
+    string ContentMemoryTableName,
+    string VideoWebhookEndpointRegistrationTableName)
 {
     public static TableStorageOptions Resolve(IConfiguration configuration)
     {
@@ -27,6 +29,8 @@ public sealed record TableStorageOptions(
             configuration["Storage:TenantTableName"] ?? "AimapTenants",
             configuration["Storage:StrategyPlanTableName"] ?? "AimapStrategyPlans",
             configuration["Storage:EditorialBacklogTableName"] ?? "AimapEditorialBacklogs",
-            configuration["Storage:TallySubmissionReceiptTableName"] ?? "AimapTallySubmissionReceipts");
+            configuration["Storage:TallySubmissionReceiptTableName"] ?? "AimapTallySubmissionReceipts",
+            configuration["Storage:ContentMemoryTableName"] ?? "AimapContentMemory",
+            configuration["Storage:VideoWebhookEndpointRegistrationTableName"] ?? "AimapVideoWebhookEndpoints");
     }
 }

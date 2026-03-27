@@ -5,6 +5,7 @@ using System.Text;
 using AIMultiAgentPlatform.Application.Abstractions;
 using AIMultiAgentPlatform.Application.Abstractions.Persistence;
 using AIMultiAgentPlatform.Application.Common;
+using AIMultiAgentPlatform.Application.Strategy;
 using AIMultiAgentPlatform.Contracts.Intake;
 using AIMultiAgentPlatform.Domain.Common;
 using AIMultiAgentPlatform.Domain.Editorial;
@@ -16,47 +17,30 @@ namespace AIMultiAgentPlatform.Application.Intake;
 
 public sealed class ProcessTallySubmissionUseCase
 {
-    private enum ConversionMode
-    {
-        Booking,
-        Website,
-        DirectMessage,
-        CommentKeyword,
-        Generic
-    }
-
-    private static readonly ContentCategory[] CategoryRotation =
-    {
-        ContentCategory.PainPoint,
-        ContentCategory.Mistake,
-        ContentCategory.MythBusting,
-        ContentCategory.Faq,
-        ContentCategory.ObjectionHandling,
-        ContentCategory.Authority,
-        ContentCategory.Story,
-        ContentCategory.Comparison,
-        ContentCategory.CtaDriven,
-        ContentCategory.Urgency
-    };
-
     private readonly ITenantRepository _tenantRepository;
     private readonly ITallySubmissionReceiptRepository _tallySubmissionReceiptRepository;
     private readonly IStrategyPlanRepository _strategyPlanRepository;
     private readonly IEditorialBacklogRepository _editorialBacklogRepository;
     private readonly IClock _clock;
+    private readonly BuildStrategicProfileUseCase _buildStrategicProfileUseCase;
+    private readonly GenerateStrategyBlueprintUseCase _generateStrategyBlueprintUseCase;
 
     public ProcessTallySubmissionUseCase(
         ITenantRepository tenantRepository,
         ITallySubmissionReceiptRepository tallySubmissionReceiptRepository,
         IStrategyPlanRepository strategyPlanRepository,
         IEditorialBacklogRepository editorialBacklogRepository,
-        IClock clock)
+        IClock clock,
+        BuildStrategicProfileUseCase? buildStrategicProfileUseCase = null,
+        GenerateStrategyBlueprintUseCase? generateStrategyBlueprintUseCase = null)
     {
         _tenantRepository = tenantRepository;
         _tallySubmissionReceiptRepository = tallySubmissionReceiptRepository;
         _strategyPlanRepository = strategyPlanRepository;
         _editorialBacklogRepository = editorialBacklogRepository;
         _clock = clock;
+        _buildStrategicProfileUseCase = buildStrategicProfileUseCase ?? new BuildStrategicProfileUseCase();
+        _generateStrategyBlueprintUseCase = generateStrategyBlueprintUseCase ?? new GenerateStrategyBlueprintUseCase();
     }
 
     public async Task<Result<TallySubmissionResponse>> ExecuteAsync(
@@ -97,6 +81,11 @@ public sealed class ProcessTallySubmissionUseCase
         if (!IsSupportedLanguage(request.ContentLanguage))
         {
             return Result<TallySubmissionResponse>.Failure("intake.language.invalid", "Content language must be English, Spanish, or Bilingual.");
+        }
+
+        if (!IsSupportedContentPlanTier(request.ContentPlanTier))
+        {
+            return Result<TallySubmissionResponse>.Failure("intake.content-plan-tier.invalid", "Content plan tier must be Starter, Growth, or Premium.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.WebsiteUrl) && !IsValidHttpUrl(request.WebsiteUrl))
@@ -148,29 +137,46 @@ public sealed class ProcessTallySubmissionUseCase
                 request.WebsiteUrl,
                 request.MainGoal,
                 desiredAction,
-                request.ContentLanguage)
+                request.ContentLanguage,
+                request.ContentPlanTier)
             .Normalize();
 
         var slug = Slugify(profile.BusinessName);
         var tenantId = new TenantId(BuildStableId("tenant", externalSubmissionId));
         var tenant = Tenant.Create(tenantId, slug, profile, _clock.UtcNow);
+        var strategicProfile = _buildStrategicProfileUseCase.Execute(profile);
+
+        var windowDays = Math.Clamp(request.BacklogWindowDays, 7, 28);
+        var strategyBlueprint = await _generateStrategyBlueprintUseCase.ExecuteAsync(strategicProfile, windowDays, cancellationToken);
 
         var strategyPlan = new StrategyPlan(
             BuildStableId("strategy", externalSubmissionId),
             tenantId,
-            BuildStrategicNarrative(profile),
-            BuildPillars(profile),
-            1,
-            3,
-            _clock.UtcNow);
+            strategyBlueprint.StrategicNarrative,
+            strategyBlueprint.ContentPillars,
+            strategyBlueprint.DailyPostingCadenceDays,
+            strategyBlueprint.VideoCadenceDays,
+            _clock.UtcNow,
+            strategyBlueprint.ContentPlanTier,
+            strategyBlueprint.MonthlyVideoTarget);
 
-        var windowDays = Math.Clamp(request.BacklogWindowDays, 7, 28);
         var backlog = new EditorialBacklog(
             BuildStableId("backlog", externalSubmissionId),
             tenantId,
             windowDays,
             _clock.UtcNow,
-            BuildBacklog(profile, windowDays));
+            strategyBlueprint.BacklogBlueprintItems
+                .Select(item => new EditorialBacklogItem(
+                    item.Sequence,
+                    item.PlannedOffsetDays,
+                    item.Category,
+                    item.PrimaryFormat,
+                    item.Topic,
+                    item.Angle,
+                    item.HookDirection,
+                    item.LeadGoal,
+                    item.UsesCallToActionKeyword))
+                .ToArray());
 
         await _tenantRepository.SaveAsync(tenant, cancellationToken);
         await _strategyPlanRepository.SaveAsync(strategyPlan, cancellationToken);
@@ -197,121 +203,6 @@ public sealed class ProcessTallySubmissionUseCase
         return Result<TallySubmissionResponse>.Success(response);
     }
 
-    private static IReadOnlyList<string> BuildPillars(ClientProfile profile)
-    {
-        var audience = CleanStrategicValue(profile.TargetAudience);
-        var offer = CleanStrategicValue(profile.Offer);
-        var niche = CleanStrategicValue(profile.Niche);
-        var primaryPain = profile.PainPoints.FirstOrDefault() ?? "low visibility";
-        var secondaryPain = profile.PainPoints.Skip(1).FirstOrDefault();
-        var primaryObjection = profile.Objections.FirstOrDefault() ?? "uncertainty about the next step";
-
-        var pillars = new List<string>
-        {
-            $"{offer} strategy for {audience} in {niche}",
-            $"How {audience} can solve {NormalizeTopicFragment(primaryPain)}",
-            $"How {audience} can overcome {NormalizeTopicFragment(primaryObjection)}",
-            $"Proof, use cases, and client outcomes around {offer}",
-            BuildConversionPillar(profile)
-        };
-
-        if (!string.IsNullOrWhiteSpace(secondaryPain))
-        {
-            pillars.Insert(2, $"How {audience} can solve {NormalizeTopicFragment(secondaryPain)}");
-        }
-
-        return pillars
-            .Select(static pillar => pillar.Trim())
-            .Where(static pillar => !string.IsNullOrWhiteSpace(pillar))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(6)
-            .ToArray();
-    }
-
-    private static IReadOnlyList<EditorialBacklogItem> BuildBacklog(ClientProfile profile, int windowDays)
-    {
-        var items = new List<EditorialBacklogItem>(windowDays);
-        var leadGoal = ResolveLeadGoal(profile);
-        for (var day = 0; day < windowDays; day++)
-        {
-            var category = CategoryRotation[day % CategoryRotation.Length];
-            var primaryFormat = (day + 1) % 3 == 0 ? PrimaryFormat.ShortVideo : PrimaryFormat.BrandedGraphic;
-            var anchor = ResolveAnchor(profile, category, day);
-            items.Add(
-                new EditorialBacklogItem(
-                    day + 1,
-                    day,
-                    category,
-                    primaryFormat,
-                    anchor.Topic,
-                    anchor.Angle,
-                    anchor.HookDirection,
-                    leadGoal,
-                    UsesKeywordDrivenCallToAction(profile, category)));
-        }
-
-        return items;
-    }
-
-    private static (string Topic, string Angle, string HookDirection) ResolveAnchor(ClientProfile profile, ContentCategory category, int index)
-    {
-        var painPoint = profile.PainPoints[index % profile.PainPoints.Count];
-        var objection = profile.Objections[index % profile.Objections.Count];
-        var audience = CleanStrategicValue(profile.TargetAudience);
-        var offer = CleanStrategicValue(profile.Offer);
-        var businessName = CleanStrategicValue(profile.BusinessName);
-        var niche = CleanStrategicValue(profile.Niche);
-
-        var normalizedPain = NormalizeTopicFragment(painPoint);
-        var normalizedObjection = NormalizeTopicFragment(objection);
-        var normalizedGoal = NormalizeTopicFragment(ResolvePrimaryOutcome(profile));
-        var conversionDestination = ResolveConversionDestination(profile);
-
-        return category switch
-        {
-            ContentCategory.PainPoint => (
-                $"Why {normalizedPain} keeps {audience} from {normalizedGoal}",
-                $"Expose the business cost of leaving {normalizedPain} unresolved and show the first practical shift toward {offer}",
-                "Open by naming the pain the audience already feels"),
-            ContentCategory.Mistake => (
-                $"Mistakes {audience} make when trying to {normalizedGoal}",
-                $"Show the avoidable mistake that makes {normalizedGoal} harder and reframe the better path through {offer}",
-                "Lead with the most expensive mistake first"),
-            ContentCategory.MythBusting => (
-                $"Myths about {offer} that keep {audience} stuck",
-                $"Challenge the false belief that blocks progress toward {normalizedGoal}",
-                "Break a widely believed myth in the opening line"),
-            ContentCategory.Faq => (
-                $"What buyers ask before investing in {offer}",
-                $"Answer a high-friction question in a simple, confidence-building way so the audience can move toward {conversionDestination}",
-                "Use a question-based hook that sounds like the buyer's inner dialogue"),
-            ContentCategory.ObjectionHandling => (
-                $"How to handle '{normalizedObjection}' before choosing {offer}",
-                $"Reframe the objection without pressure and show what the audience gains by moving forward",
-                "Address the objection directly and empathetically"),
-            ContentCategory.Authority => (
-                $"{niche} insights that improve {normalizedGoal}",
-                $"Teach a nuanced insight that positions {businessName} as the trusted guide for {audience}",
-                "Reveal the expert perspective most buyers miss"),
-            ContentCategory.Story => (
-                $"A client-style story about moving from {normalizedPain} to {normalizedGoal}",
-                $"Use a believable before-and-after scenario that makes the transformation feel attainable through {offer}",
-                "Open with a vivid scenario the audience can see themselves in"),
-            ContentCategory.Comparison => (
-                $"{offer} versus patchwork solutions for {audience}",
-                $"Contrast the reactive path with the more strategic path and make the tradeoff clear",
-                "Use a side-by-side contrast hook"),
-            ContentCategory.CtaDriven => (
-                BuildCallToActionTopic(profile),
-                BuildCallToActionAngle(profile),
-                BuildCallToActionHook(profile)),
-            _ => (
-                $"What delaying {offer} costs {audience}",
-                $"Create urgency by showing how waiting makes {normalizedPain} and {normalizedGoal} harder to improve",
-                "Lead with the cost of waiting, not generic urgency")
-        };
-    }
-
     private static string Slugify(string value)
     {
         var normalized = value.Trim().ToLowerInvariant();
@@ -324,150 +215,6 @@ public sealed class ProcessTallySubmissionUseCase
     {
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed.Trim().ToLowerInvariant()));
         return $"{prefix}_{Convert.ToHexString(hash)[..24].ToLowerInvariant()}";
-    }
-
-    private static string BuildConversionPillar(ClientProfile profile)
-    {
-        var audience = CleanStrategicValue(profile.TargetAudience);
-
-        return ResolveConversionMode(profile) switch
-        {
-            ConversionMode.Booking => $"Conversion content that moves {audience} toward booked consultations",
-            ConversionMode.Website => $"Conversion content that moves {audience} toward high-intent website visits",
-            ConversionMode.DirectMessage => $"Conversion content that moves {audience} into direct-message conversations",
-            ConversionMode.CommentKeyword => $"Conversion content that moves {audience} into comment-driven lead capture",
-            _ => $"Conversion content aligned to {NormalizeTopicFragment(ResolvePrimaryOutcome(profile))}"
-        };
-    }
-
-    private static string BuildStrategicNarrative(ClientProfile profile)
-    {
-        var primaryPain = NormalizeTopicFragment(profile.PainPoints.FirstOrDefault() ?? "low visibility");
-        var primaryObjection = NormalizeTopicFragment(profile.Objections.FirstOrDefault() ?? "uncertainty about the next step");
-        var conversionDestination = ResolveConversionDestination(profile);
-        var audience = CleanStrategicValue(profile.TargetAudience).ToLowerInvariant();
-        var offer = CleanStrategicValue(profile.Offer).ToLowerInvariant();
-
-        return
-            $"{CleanStrategicValue(profile.BusinessName)} should publish daily {profile.ContentLanguage.ToLowerInvariant()} content for {audience} that positions {offer} as the trusted answer to {primaryPain}, dismantles objections like {primaryObjection}, and consistently moves the audience toward {conversionDestination}.";
-    }
-
-    private static string ResolvePrimaryOutcome(ClientProfile profile) =>
-        FirstNonEmpty(profile.MainGoal, profile.DesiredAction, $"better results in {profile.Niche}");
-
-    private static string ResolveConversionDestination(ClientProfile profile)
-    {
-        return ResolveConversionMode(profile) switch
-        {
-            ConversionMode.Booking => !string.IsNullOrWhiteSpace(profile.CalendlyUrl)
-                ? "booking a consultation through the scheduling link"
-                : "booking a consultation",
-            ConversionMode.Website => !string.IsNullOrWhiteSpace(profile.WebsiteUrl)
-                ? "visiting the website and taking the next step there"
-                : "visiting the website",
-            ConversionMode.DirectMessage => "starting a direct-message conversation",
-            ConversionMode.CommentKeyword => $"commenting with the keyword {profile.CallToActionKeyword}",
-            _ => NormalizeTopicFragment(ResolvePrimaryOutcome(profile))
-        };
-    }
-
-    private static string ResolveLeadGoal(ClientProfile profile)
-    {
-        return ResolveConversionMode(profile) switch
-        {
-            ConversionMode.Booking => "book_consultation",
-            ConversionMode.Website => "visit_website",
-            ConversionMode.DirectMessage => "send_dm",
-            ConversionMode.CommentKeyword => "comment_keyword",
-            _ => "generate_lead"
-        };
-    }
-
-    private static bool UsesKeywordDrivenCallToAction(ClientProfile profile, ContentCategory category)
-    {
-        var leadGoal = ResolveLeadGoal(profile);
-        if (leadGoal is not ("send_dm" or "comment_keyword"))
-        {
-            return false;
-        }
-
-        return category is ContentCategory.CtaDriven or ContentCategory.ObjectionHandling or ContentCategory.Urgency;
-    }
-
-    private static string BuildCallToActionTopic(ClientProfile profile)
-    {
-        var offer = CleanStrategicValue(profile.Offer);
-        var audience = CleanStrategicValue(profile.TargetAudience);
-
-        return ResolveConversionMode(profile) switch
-        {
-            ConversionMode.Booking => $"What to expect before booking {offer}",
-            ConversionMode.Website => $"What {audience} should review before visiting the website",
-            ConversionMode.DirectMessage => $"When to send a DM about {offer}",
-            ConversionMode.CommentKeyword => $"When to comment '{profile.CallToActionKeyword}' for the next step",
-            _ => $"How to take the next step toward {NormalizeTopicFragment(ResolvePrimaryOutcome(profile))}"
-        };
-    }
-
-    private static string BuildCallToActionAngle(ClientProfile profile)
-    {
-        return ResolveConversionMode(profile) switch
-        {
-            ConversionMode.Booking => $"Reduce booking friction by showing the audience exactly why and when to schedule with {profile.BusinessName}",
-            ConversionMode.Website => "Build enough curiosity and trust to send the audience to the website with clear purchase intent",
-            ConversionMode.DirectMessage => "Lower the barrier to conversation and make the DM feel like the natural next step",
-            ConversionMode.CommentKeyword => $"Create curiosity around the keyword {profile.CallToActionKeyword} without sounding gimmicky",
-            _ => $"Move the audience toward {NormalizeTopicFragment(ResolvePrimaryOutcome(profile))} with a clear next step"
-        };
-    }
-
-    private static string BuildCallToActionHook(ClientProfile profile)
-    {
-        return ResolveConversionMode(profile) switch
-        {
-            ConversionMode.Booking => "Open by removing the fear or uncertainty behind booking",
-            ConversionMode.Website => "Open with a curiosity gap that makes the website visit feel valuable",
-            ConversionMode.DirectMessage => "Open by making the conversation feel easy and low-pressure",
-            ConversionMode.CommentKeyword => "Open with a CTA-oriented curiosity gap",
-            _ => "Open with the clearest next step available"
-        };
-    }
-
-    private static ConversionMode ResolveConversionMode(ClientProfile profile)
-    {
-        var desiredAction = profile.DesiredAction;
-
-        if (ContainsAny(desiredAction, "comment"))
-        {
-            return ConversionMode.CommentKeyword;
-        }
-
-        if (ContainsAny(desiredAction, "dm", "message"))
-        {
-            return ConversionMode.DirectMessage;
-        }
-
-        if (ContainsAny(desiredAction, "website", "site", "web", "page", "landing", "visit"))
-        {
-            return ConversionMode.Website;
-        }
-
-        if (ContainsAny(desiredAction, "book", "consult", "call", "appointment"))
-        {
-            return ConversionMode.Booking;
-        }
-
-        if (!string.IsNullOrWhiteSpace(profile.CalendlyUrl))
-        {
-            return ConversionMode.Booking;
-        }
-
-        if (!string.IsNullOrWhiteSpace(profile.WebsiteUrl))
-        {
-            return ConversionMode.Website;
-        }
-
-        return ConversionMode.Generic;
     }
 
     private static TallySubmissionResponse ToResponse(TallySubmissionReceipt receipt) =>
@@ -640,24 +387,11 @@ public sealed class ProcessTallySubmissionUseCase
         value.Equals("Spanish", StringComparison.OrdinalIgnoreCase) ||
         value.Equals("Bilingual", StringComparison.OrdinalIgnoreCase);
 
-    private static bool ContainsAny(string? value, params string[] fragments)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        return fragments.Any(fragment => value.Contains(fragment, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string NormalizeTopicFragment(string value) =>
-        value
-            .Trim()
-            .TrimEnd('.', '!', '?')
-            .ToLowerInvariant();
-
-    private static string CleanStrategicValue(string value) =>
-        Regex.Replace(value.Trim().TrimEnd('.', '!', '?'), @"\s+", " ");
+    private static bool IsSupportedContentPlanTier(string? value) =>
+        string.IsNullOrWhiteSpace(value) ||
+        value.Equals("Starter", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("Growth", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("Premium", StringComparison.OrdinalIgnoreCase);
 
     private static string FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;

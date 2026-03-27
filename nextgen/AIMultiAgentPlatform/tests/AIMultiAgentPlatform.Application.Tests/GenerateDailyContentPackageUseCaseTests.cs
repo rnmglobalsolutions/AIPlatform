@@ -1,5 +1,6 @@
 using AIMultiAgentPlatform.Application.Abstractions;
 using AIMultiAgentPlatform.Application.Abstractions.Persistence;
+using AIMultiAgentPlatform.Application.Content;
 using AIMultiAgentPlatform.Application.DailyContent;
 using AIMultiAgentPlatform.Contracts.Content;
 using AIMultiAgentPlatform.Domain.Common;
@@ -46,6 +47,7 @@ public sealed class GenerateDailyContentPackageUseCaseTests
         var primaryAssetRepository = new FakePrimaryAssetRepository();
         var captionAssetRepository = new FakeCaptionAssetRepository();
         var bundleRepository = new FakeRepurposedAssetBundleRepository();
+        var memoryRepository = new FakeContentMemoryRepository();
 
         var useCase = new GenerateDailyContentPackageUseCase(
             tenantRepository,
@@ -56,7 +58,9 @@ public sealed class GenerateDailyContentPackageUseCaseTests
             captionAssetRepository,
             bundleRepository,
             new DeterministicIdGenerator(),
-            new FixedClock());
+            new FixedClock(),
+            memoryRepository,
+            new GenerateCanonicalContentFrameUseCase());
 
         var result = await useCase.ExecuteAsync(
             new GenerateDailyContentPackageCommand(
@@ -69,9 +73,15 @@ public sealed class GenerateDailyContentPackageUseCaseTests
         Assert.Equal("daily_request_001", result.Value!.DailyContentRequestId);
         Assert.Equal("ShortVideo", result.Value.PrimaryFormat);
         Assert.Contains("HeyGen-compatible", primaryAssetRepository.Saved!.ProductionNotes);
+        Assert.Contains("HOOK:", primaryAssetRepository.Saved.Body, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("BOOK", captionAssetRepository.Saved!.CallToActionKeyword);
         Assert.Equal(3, bundleRepository.Saved!.StoryFrames.Count);
+        Assert.Contains("Open with the hidden edge", bundleRepository.Saved.CommentHooks[0], StringComparison.OrdinalIgnoreCase);
         Assert.Equal("corr-123", requestRepository.Saved!.CorrelationId);
+        Assert.NotNull(memoryRepository.Saved);
+        Assert.Equal("Authority insight", memoryRepository.Saved!.Topic);
+        Assert.Equal(primaryAssetRepository.Saved.PrimaryAssetId, memoryRepository.Saved.SourceAssetId);
+        Assert.Equal(ContentMemoryLifecycleStage.Generated, memoryRepository.Saved.LifecycleStage);
     }
 
     [Fact]
@@ -239,6 +249,87 @@ public sealed class GenerateDailyContentPackageUseCaseTests
         Assert.Contains("Visit https://rnmgrowth.com", bundleRepository.Saved!.CarouselOutline, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_UsesContentMemoryToAvoidRecentTopicRepetition()
+    {
+        var tenant = Tenant.Create(
+            new TenantId("tenant_004"),
+            "rnm-growth",
+            new ClientProfile(
+                "RNM Growth",
+                "Jane Doe",
+                "jane@rnm.test",
+                "Marketing consulting",
+                "Lead-gen systems",
+                "Founders",
+                "Bold",
+                "BOOK",
+                ["Instagram"],
+                ["Low visibility"],
+                ["No time"],
+                []),
+            DateTime.UtcNow);
+
+        var backlog = new EditorialBacklog(
+            "backlog_004",
+            tenant.TenantId,
+            14,
+            DateTime.UtcNow,
+            [new EditorialBacklogItem(1, 0, ContentCategory.Authority, PrimaryFormat.ShortVideo, "Inbound demand", "Show the smarter growth path", "Lead with the hidden cost of waiting", "comments_or_dms", true)]);
+
+        var memoryRepository = new FakeContentMemoryRepository
+        {
+            Snapshot = new ContentMemorySnapshot(
+                tenant.TenantId,
+                new DateTime(2026, 03, 26, 12, 0, 0, DateTimeKind.Utc),
+                [
+                    new ContentMemoryEntry(
+                        "content_memory_001",
+                        tenant.TenantId,
+                        "PrimaryAsset",
+                        "primary_001",
+                        "Lead nurturing",
+                        "Start with the hidden penalty",
+                        "Comment BOOK",
+                        "comment_keyword",
+                        "Instagram",
+                        "hash-001",
+                        new DateTime(2026, 03, 20, 12, 0, 0, DateTimeKind.Utc),
+                        ContentMemoryLifecycleStage.Published)
+                ],
+                ["Lead nurturing"],
+                ["Start with the hidden penalty"],
+                ["Comment BOOK"],
+                ["Instagram"],
+                ["comment_keyword"],
+                ["hash-001"])
+        };
+
+        var briefRepository = new FakeDailyContentBriefRepository();
+
+        var useCase = new GenerateDailyContentPackageUseCase(
+            new FakeTenantRepository(tenant),
+            new FakeEditorialBacklogRepository(backlog),
+            new FakeDailyContentRequestRepository(),
+            briefRepository,
+            new FakePrimaryAssetRepository(),
+            new FakeCaptionAssetRepository(),
+            new FakeRepurposedAssetBundleRepository(),
+            new DeterministicIdGenerator(),
+            new FixedClock(),
+            memoryRepository,
+            new GenerateCanonicalContentFrameUseCase());
+
+        var result = await useCase.ExecuteAsync(
+            new GenerateDailyContentPackageCommand(
+                new GenerateDailyContentPackageRequest(tenant.TenantId.Value, backlog.EditorialBacklogId, 1)),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains("Avoid repeating recent topics like lead nurturing", briefRepository.Saved!.CoreMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Avoid reusing hook patterns like start with the hidden penalty", briefRepository.Saved.CoreMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class DeterministicIdGenerator : IIdGenerator
     {
         private int _sequence;
@@ -351,5 +442,22 @@ public sealed class GenerateDailyContentPackageUseCaseTests
 
         public Task<RepurposedAssetBundle?> FindByRequestIdAsync(string requestId, CancellationToken cancellationToken) =>
             Task.FromResult(Saved?.DailyContentRequestId == requestId ? Saved : null);
+    }
+
+    private sealed class FakeContentMemoryRepository : IContentMemoryRepository
+    {
+        public ContentMemoryEntry? Saved { get; private set; }
+
+        public ContentMemorySnapshot Snapshot { get; set; } =
+            ContentMemorySnapshot.Empty(new TenantId("tenant_001"), new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc));
+
+        public Task SaveAsync(ContentMemoryEntry entry, CancellationToken cancellationToken)
+        {
+            Saved = entry;
+            return Task.CompletedTask;
+        }
+
+        public Task<ContentMemorySnapshot> GetSnapshotAsync(string tenantId, int maxEntries, CancellationToken cancellationToken) =>
+            Task.FromResult(Snapshot);
     }
 }

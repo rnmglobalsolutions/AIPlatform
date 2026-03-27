@@ -39,7 +39,8 @@ public sealed class ProcessTallySubmissionUseCaseTests
             ["Low visibility", "Weak pipeline"],
             ["No time", "Unsure what to post"],
             ["Politics"],
-            14);
+            14,
+            ContentPlanTier: "Growth");
 
         var result = await useCase.ExecuteAsync(new ProcessTallySubmissionCommand(request), CancellationToken.None);
 
@@ -57,7 +58,9 @@ public sealed class ProcessTallySubmissionUseCaseTests
         Assert.Contains(backlogRepository.Saved.Items, item => item.LeadGoal == "comment_keyword");
         Assert.Contains(backlogRepository.Saved.Items, item => item.Category == ContentCategory.CtaDriven && item.UsesCallToActionKeyword);
         Assert.Equal(1, strategyPlanRepository.Saved!.DailyPostingCadenceDays);
-        Assert.Equal(3, strategyPlanRepository.Saved.VideoCadenceDays);
+        Assert.Equal(2, strategyPlanRepository.Saved.VideoCadenceDays);
+        Assert.Equal(ContentPlanTier.Growth, strategyPlanRepository.Saved.ContentPlanTier);
+        Assert.Equal(16, strategyPlanRepository.Saved.MonthlyVideoTarget);
         Assert.Equal(result.Value.TenantId, receiptRepository.Saved!.TenantId);
         Assert.Contains("Content-led growth strategy for Founders in B2B consultants", strategyPlanRepository.Saved.ContentPillars);
         Assert.Contains("How Founders can solve low visibility", strategyPlanRepository.Saved.ContentPillars);
@@ -240,6 +243,30 @@ public sealed class ProcessTallySubmissionUseCaseTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("intake.language.invalid", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReturnsFailureWhenContentPlanTierIsUnsupported()
+    {
+        var useCase = new ProcessTallySubmissionUseCase(
+            new FakeTenantRepository(),
+            new FakeTallySubmissionReceiptRepository(),
+            new FakeStrategyPlanRepository(),
+            new FakeEditorialBacklogRepository(),
+            new FixedClock());
+
+        var request = new TallySubmissionRequest(
+            "sub_126b",
+            "RNM Growth",
+            "Jane Doe",
+            "jane@rnm.test",
+            "B2B consultants",
+            ContentPlanTier: "Enterprise");
+
+        var result = await useCase.ExecuteAsync(new ProcessTallySubmissionCommand(request), CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("intake.content-plan-tier.invalid", result.ErrorCode);
     }
 
     [Fact]

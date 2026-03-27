@@ -153,6 +153,14 @@ resource apiWebApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
           value: serviceBusFullyQualifiedNamespace
         }
         {
+          name: 'PublicEndpoints__FunctionsBaseUrl'
+          value: 'https://${workerFunctionAppName}.azurewebsites.net'
+        }
+        {
+          name: 'PublicEndpoints__HeyGenWebhookPath'
+          value: 'api/integrations/heygen/webhook'
+        }
+        {
           name: 'OpenAI__ApiKeySecretName'
           value: 'openai-api-key'
         }
@@ -284,6 +292,14 @@ resource leanFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (isLean) {
           name: 'ServiceBus__FullyQualifiedNamespace'
           value: serviceBusFullyQualifiedNamespace
         }
+        {
+          name: 'PublicEndpoints__FunctionsBaseUrl'
+          value: 'https://${workerFunctionAppName}.azurewebsites.net'
+        }
+        {
+          name: 'PublicEndpoints__HeyGenWebhookPath'
+          value: 'api/integrations/heygen/webhook'
+        }
       ]
     }
   }
@@ -378,6 +394,14 @@ resource productionFunctionApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
         {
           name: 'ServiceBus__FullyQualifiedNamespace'
           value: serviceBusFullyQualifiedNamespace
+        }
+        {
+          name: 'PublicEndpoints__FunctionsBaseUrl'
+          value: 'https://${workerFunctionAppName}.azurewebsites.net'
+        }
+        {
+          name: 'PublicEndpoints__HeyGenWebhookPath'
+          value: 'api/integrations/heygen/webhook'
         }
       ]
     }

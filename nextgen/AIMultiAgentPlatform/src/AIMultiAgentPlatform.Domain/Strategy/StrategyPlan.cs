@@ -9,4 +9,6 @@ public sealed record StrategyPlan(
     IReadOnlyList<string> ContentPillars,
     int DailyPostingCadenceDays,
     int VideoCadenceDays,
-    DateTime CreatedUtc);
+    DateTime CreatedUtc,
+    ContentPlanTier ContentPlanTier = ContentPlanTier.Starter,
+    int MonthlyVideoTarget = 8);

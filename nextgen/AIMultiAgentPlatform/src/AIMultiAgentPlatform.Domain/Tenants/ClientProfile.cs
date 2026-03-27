@@ -19,7 +19,8 @@ public sealed record ClientProfile(
     string WebsiteUrl = "",
     string MainGoal = "",
     string DesiredAction = "",
-    string ContentLanguage = "English")
+    string ContentLanguage = "English",
+    string ContentPlanTier = "Starter")
 {
     public ClientProfile Normalize() =>
         this with
@@ -40,6 +41,7 @@ public sealed record ClientProfile(
             MainGoal = NormalizeValue(MainGoal, "Generate more leads"),
             DesiredAction = NormalizeValue(DesiredAction, "Comment or DM for more details"),
             ContentLanguage = NormalizeLanguage(ContentLanguage),
+            ContentPlanTier = NormalizeContentPlanTier(ContentPlanTier),
             PainPoints = NormalizeList(PainPoints, ["Low visibility", "Inconsistent lead flow"]),
             Objections = NormalizeList(Objections, ["No time", "Unsure what to post"]),
             AvoidTopics = NormalizeList(AvoidTopics, Array.Empty<string>())
@@ -61,6 +63,19 @@ public sealed record ClientProfile(
             "spanish" => "Spanish",
             "bilingual" => "Bilingual",
             _ => "English"
+        };
+    }
+
+    private static string NormalizeContentPlanTier(string? value)
+    {
+        var normalized = NormalizeValue(value, "Starter");
+
+        return normalized.ToLowerInvariant() switch
+        {
+            "starter" => "Starter",
+            "growth" => "Growth",
+            "premium" => "Premium",
+            _ => "Starter"
         };
     }
 

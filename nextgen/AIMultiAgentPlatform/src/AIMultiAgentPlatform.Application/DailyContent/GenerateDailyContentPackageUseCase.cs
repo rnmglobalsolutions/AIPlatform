@@ -1,7 +1,10 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using AIMultiAgentPlatform.Application.Abstractions;
 using AIMultiAgentPlatform.Application.Abstractions.Persistence;
 using AIMultiAgentPlatform.Application.Common;
+using AIMultiAgentPlatform.Application.Content;
 using AIMultiAgentPlatform.Contracts.Content;
 using AIMultiAgentPlatform.Domain.Common;
 using AIMultiAgentPlatform.Domain.Content;
@@ -19,8 +22,10 @@ public sealed class GenerateDailyContentPackageUseCase
     private readonly IPrimaryAssetRepository _primaryAssetRepository;
     private readonly ICaptionAssetRepository _captionAssetRepository;
     private readonly IRepurposedAssetBundleRepository _repurposedAssetBundleRepository;
+    private readonly IContentMemoryRepository? _contentMemoryRepository;
     private readonly IIdGenerator _idGenerator;
     private readonly IClock _clock;
+    private readonly GenerateCanonicalContentFrameUseCase _generateCanonicalContentFrameUseCase;
 
     public GenerateDailyContentPackageUseCase(
         ITenantRepository tenantRepository,
@@ -31,7 +36,9 @@ public sealed class GenerateDailyContentPackageUseCase
         ICaptionAssetRepository captionAssetRepository,
         IRepurposedAssetBundleRepository repurposedAssetBundleRepository,
         IIdGenerator idGenerator,
-        IClock clock)
+        IClock clock,
+        IContentMemoryRepository? contentMemoryRepository = null,
+        GenerateCanonicalContentFrameUseCase? generateCanonicalContentFrameUseCase = null)
     {
         _tenantRepository = tenantRepository;
         _editorialBacklogRepository = editorialBacklogRepository;
@@ -40,8 +47,10 @@ public sealed class GenerateDailyContentPackageUseCase
         _primaryAssetRepository = primaryAssetRepository;
         _captionAssetRepository = captionAssetRepository;
         _repurposedAssetBundleRepository = repurposedAssetBundleRepository;
+        _contentMemoryRepository = contentMemoryRepository;
         _idGenerator = idGenerator;
         _clock = clock;
+        _generateCanonicalContentFrameUseCase = generateCanonicalContentFrameUseCase ?? new GenerateCanonicalContentFrameUseCase();
     }
 
     public async Task<Result<GenerateDailyContentPackageResponse>> ExecuteAsync(
@@ -94,16 +103,32 @@ public sealed class GenerateDailyContentPackageUseCase
             _clock.UtcNow,
             correlationId);
 
-        var brief = BuildBrief(dailyRequest, tenant.Profile, backlogItem);
-        var primaryAsset = BuildPrimaryAsset(dailyRequest, brief, tenant.Profile);
-        var captionAsset = BuildCaptionAsset(dailyRequest, brief, primaryAsset, tenant.Profile);
-        var repurposedAssetBundle = BuildRepurposedAssetBundle(dailyRequest, brief, primaryAsset, tenant.Profile);
+        var memorySnapshot = _contentMemoryRepository is null
+            ? null
+            : await _contentMemoryRepository.GetSnapshotAsync(tenant.TenantId.Value, 10, cancellationToken);
+        var canonicalFrame = await _generateCanonicalContentFrameUseCase.ExecuteAsync(
+            tenant.TenantId,
+            tenant.Profile,
+            backlogItem,
+            memorySnapshot,
+            cancellationToken);
+
+        var brief = BuildBrief(dailyRequest, tenant.Profile, canonicalFrame);
+        var primaryAsset = BuildPrimaryAsset(dailyRequest, canonicalFrame);
+        var captionAsset = BuildCaptionAsset(dailyRequest, canonicalFrame, tenant.Profile);
+        var repurposedAssetBundle = BuildRepurposedAssetBundle(dailyRequest, canonicalFrame, tenant.Profile);
 
         await _dailyContentRequestRepository.SaveAsync(dailyRequest, cancellationToken);
         await _dailyContentBriefRepository.SaveAsync(brief, cancellationToken);
         await _primaryAssetRepository.SaveAsync(primaryAsset, cancellationToken);
         await _captionAssetRepository.SaveAsync(captionAsset, cancellationToken);
         await _repurposedAssetBundleRepository.SaveAsync(repurposedAssetBundle, cancellationToken);
+        if (_contentMemoryRepository is not null)
+        {
+            await _contentMemoryRepository.SaveAsync(
+                BuildContentMemoryEntry(dailyRequest, tenant, backlogItem, canonicalFrame, primaryAsset),
+                cancellationToken);
+        }
 
         return Result<GenerateDailyContentPackageResponse>.Success(
             new GenerateDailyContentPackageResponse(
@@ -118,112 +143,94 @@ public sealed class GenerateDailyContentPackageUseCase
     private DailyContentBrief BuildBrief(
         DailyContentRequest request,
         ClientProfile profile,
-        EditorialBacklogItem backlogItem)
-    {
-        var languageGuidance = BuildLanguageGuidance(profile);
-        var coreMessage =
-            $"{backlogItem.Angle}. Show {profile.TargetAudience.ToLowerInvariant()} how {profile.Offer.ToLowerInvariant()} helps them move past {backlogItem.Topic.ToLowerInvariant()} without sounding repetitive. {languageGuidance} Keep it aligned to the goal of {profile.MainGoal.ToLowerInvariant()} and the desired action of {profile.DesiredAction.ToLowerInvariant()}.";
-
-        return new DailyContentBrief(
+        CanonicalContentFrame canonicalFrame) =>
+        new(
             _idGenerator.NewId("brief"),
             request.DailyContentRequestId,
             request.TenantId,
-            backlogItem.Category,
-            backlogItem.PrimaryFormat,
-            backlogItem.Topic,
-            backlogItem.Angle,
-            backlogItem.HookDirection,
-            coreMessage,
-            profile.CallToActionKeyword,
+            canonicalFrame.Category,
+            canonicalFrame.PrimaryFormat,
+            canonicalFrame.Topic,
+            canonicalFrame.Angle,
+            canonicalFrame.HookDirection,
+            canonicalFrame.CoreMessage,
+            canonicalFrame.CallToActionKeyword,
             profile.BrandTone);
-    }
 
     private PrimaryAsset BuildPrimaryAsset(
         DailyContentRequest request,
-        DailyContentBrief brief,
-        ClientProfile profile)
+        CanonicalContentFrame canonicalFrame)
     {
-        var headline = brief.PrimaryFormat == PrimaryFormat.ShortVideo
-            ? $"Short video: {brief.Topic}"
-            : $"Graphic post: {brief.Topic}";
-
-        var languageFormatInstruction = BuildLanguageFormatInstruction(profile);
-        var hook = $"{brief.HookDirection}. {brief.Topic}.";
-        var body = brief.PrimaryFormat == PrimaryFormat.ShortVideo
-            ? $"HOOK: {hook}\nBODY: Teach one practical shift around {brief.Angle.ToLowerInvariant()} for {profile.TargetAudience.ToLowerInvariant()}. {languageFormatInstruction}\nPAYOFF: Tie the lesson back to {profile.Offer.ToLowerInvariant()} with a clear next step that supports {profile.MainGoal.ToLowerInvariant()}."
-            : $"Lead with a bold headline about {brief.Topic}. Reinforce {brief.Angle.ToLowerInvariant()} in concise supporting copy for a Canva-ready branded graphic. {languageFormatInstruction}";
-        var payoff = brief.PrimaryFormat == PrimaryFormat.ShortVideo
-            ? $"Leave the viewer with one simple action they can take today to improve {profile.Niche.ToLowerInvariant()} performance and move closer to {profile.MainGoal.ToLowerInvariant()}."
-            : $"Make the visual feel actionable and save-worthy so the audience wants to revisit the message later and feel ready to {profile.DesiredAction.ToLowerInvariant()}.";
-        var callToAction = BuildCallToAction(profile, brief.CallToActionKeyword);
-        var productionNotes = brief.PrimaryFormat == PrimaryFormat.ShortVideo
-            ? $"15-45 second HeyGen-compatible script. {languageFormatInstruction} Keep cadence natural, conversational, and easy to subtitle in {profile.ContentLanguage.ToLowerInvariant()}."
-            : $"Design in Canva with strong brand hierarchy, one core message, and a CTA-ready footer treatment. {languageFormatInstruction}";
+        var headline = canonicalFrame.PrimaryFormat == PrimaryFormat.ShortVideo
+            ? $"Short video: {canonicalFrame.Topic}"
+            : $"Graphic post: {canonicalFrame.Topic}";
 
         return new PrimaryAsset(
             _idGenerator.NewId("primary_asset"),
             request.DailyContentRequestId,
             request.TenantId,
-            brief.PrimaryFormat,
+            canonicalFrame.PrimaryFormat,
             headline,
-            hook,
-            body,
-            payoff,
-            callToAction,
-            productionNotes);
+            canonicalFrame.PrimaryHook,
+            canonicalFrame.Body,
+            canonicalFrame.Payoff,
+            canonicalFrame.CallToAction,
+            canonicalFrame.ProductionNotes);
     }
 
     private CaptionAsset BuildCaptionAsset(
         DailyContentRequest request,
-        DailyContentBrief brief,
-        PrimaryAsset primaryAsset,
+        CanonicalContentFrame canonicalFrame,
         ClientProfile profile)
     {
-        var engagementPrompt = BuildEngagementPrompt(profile, brief);
-        var desiredActionPrompt = BuildDesiredActionPrompt(profile, brief.CallToActionKeyword);
         var caption =
-            $"{primaryAsset.Hook} {brief.Angle}. {brief.CoreMessage} {engagementPrompt} {desiredActionPrompt}";
+            $"{canonicalFrame.PrimaryHook} {canonicalFrame.Angle}. {canonicalFrame.CoreMessage} {canonicalFrame.EngagementPrompt} {canonicalFrame.DesiredActionPrompt}";
 
         return new CaptionAsset(
             _idGenerator.NewId("caption"),
             request.DailyContentRequestId,
             caption,
-            engagementPrompt,
-            brief.CallToActionKeyword,
+            canonicalFrame.EngagementPrompt,
+            canonicalFrame.CallToActionKeyword,
             BuildHashtags(profile));
     }
 
     private RepurposedAssetBundle BuildRepurposedAssetBundle(
         DailyContentRequest request,
-        DailyContentBrief brief,
-        PrimaryAsset primaryAsset,
+        CanonicalContentFrame canonicalFrame,
         ClientProfile profile)
     {
+        var carouselDirective = canonicalFrame.RepurposeDirectives.FirstOrDefault(directive =>
+            directive.Format.Equals("Carousel", StringComparison.OrdinalIgnoreCase));
+        var storiesDirective = canonicalFrame.RepurposeDirectives.FirstOrDefault(directive =>
+            directive.Format.Equals("Stories", StringComparison.OrdinalIgnoreCase));
+        var linkedInDirective = canonicalFrame.RepurposeDirectives.FirstOrDefault(directive =>
+            directive.Format.Equals("LinkedIn", StringComparison.OrdinalIgnoreCase));
+        var repurposeCallToAction = BuildRepurposeCallToAction(profile, canonicalFrame.CallToActionKeyword);
         var carouselOutline =
-            $"Slide 1: {brief.Topic}\nSlide 2: Why this matters\nSlide 3: The common mistake\nSlide 4: The better move\nSlide 5: CTA -> {BuildRepurposeCallToAction(profile, brief.CallToActionKeyword)}";
+            $"Slide 1: {canonicalFrame.Topic}\nSlide 2: {canonicalFrame.PrimaryHook}\nSlide 3: {canonicalFrame.Angle}\nSlide 4: {canonicalFrame.Payoff}\nSlide 5: CTA -> {carouselDirective?.Prompt ?? repurposeCallToAction}";
 
         var storyFrames = new[]
         {
-            $"Frame 1: Quick tension around {brief.Topic}",
-            $"Frame 2: One insight on {brief.Angle.ToLowerInvariant()}",
-            $"Frame 3: CTA sticker -> {BuildRepurposeCallToAction(profile, brief.CallToActionKeyword)}"
+            $"Frame 1: {canonicalFrame.PrimaryHook}",
+            $"Frame 2: {storiesDirective?.Intent ?? $"One insight on {canonicalFrame.Angle.ToLowerInvariant()}"}",
+            $"Frame 3: CTA sticker -> {storiesDirective?.Prompt ?? repurposeCallToAction}"
         };
 
         var linkedInPost =
-            $"Most teams don’t have a content problem. They have a positioning problem around {brief.Topic.ToLowerInvariant()}. {brief.Angle}.\n\n{brief.CoreMessage}\n\n{BuildDesiredActionPrompt(profile, brief.CallToActionKeyword)}";
+            $"{linkedInDirective?.Intent ?? $"Most teams don’t have a content problem around {canonicalFrame.Topic.ToLowerInvariant()}."}\n\n{canonicalFrame.CoreMessage}\n\n{linkedInDirective?.Prompt ?? canonicalFrame.DesiredActionPrompt}";
 
         var quotePost =
-            $"\"{brief.Angle}. The right content turns attention into conversations and conversations into qualified demand.\"";
+            $"\"{canonicalFrame.Angle}. {canonicalFrame.Payoff}\"";
 
         var shortClipIdea =
-            $"Create a 10-second clip that isolates the strongest line from the hook: '{primaryAsset.Hook}' and pair it with fast captions plus a CTA for {BuildRepurposeCallToAction(profile, brief.CallToActionKeyword)}.";
+            $"Create a 10-second clip from the hook '{canonicalFrame.PrimaryHook}' and land on '{canonicalFrame.CallToAction}'.";
 
-        var commentHooks = new[]
-        {
-            $"What is the biggest blocker you see around {brief.Topic.ToLowerInvariant()}?",
-            BuildFollowUpQuestion(profile, brief.CallToActionKeyword),
-            $"Which part feels harder right now: consistency or conversion?"
-        };
+        var commentHooks = canonicalFrame.HookVariants
+            .Take(2)
+            .Select(variant => variant.Text)
+            .Append(BuildFollowUpQuestion(profile, canonicalFrame.CallToActionKeyword))
+            .ToArray();
 
         return new RepurposedAssetBundle(
             _idGenerator.NewId("repurpose"),
@@ -236,80 +243,34 @@ public sealed class GenerateDailyContentPackageUseCase
             commentHooks);
     }
 
-    private static string BuildLanguageGuidance(ClientProfile profile) =>
-        profile.ContentLanguage switch
-        {
-            "Spanish" => "Write the content in Spanish.",
-            "Bilingual" => "Deliver the content in bilingual format with English first and Spanish immediately after when practical.",
-            _ => "Write the content in English."
-        };
-
-    private static string BuildLanguageFormatInstruction(ClientProfile profile) =>
-        profile.ContentLanguage switch
-        {
-            "Spanish" => "Use Spanish-first phrasing.",
-            "Bilingual" => "Format key lines in both English and Spanish.",
-            _ => "Use English-first phrasing."
-        };
-
-    private static string BuildCallToAction(ClientProfile profile, string callToActionKeyword)
+    private ContentMemoryEntry BuildContentMemoryEntry(
+        DailyContentRequest request,
+        Tenant tenant,
+        EditorialBacklogItem backlogItem,
+        CanonicalContentFrame canonicalFrame,
+        PrimaryAsset primaryAsset)
     {
-        if (RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl))
-        {
-            return $"Invite the audience to book directly through {profile.CalendlyUrl} or DM '{callToActionKeyword}' if they want help first.";
-        }
+        var contentHash = Convert.ToHexString(
+            SHA256.HashData(
+                Encoding.UTF8.GetBytes(
+                    $"{canonicalFrame.PrimaryFormat}|{canonicalFrame.Topic}|{canonicalFrame.PrimaryHook}|{canonicalFrame.CallToAction}")))
+            .ToLowerInvariant();
 
-        if (RequiresWebsiteCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.WebsiteUrl))
-        {
-            return $"Invite the audience to visit {profile.WebsiteUrl} and mention '{callToActionKeyword}' if they want guidance before taking the next step.";
-        }
-
-        if (ContainsAny(profile.DesiredAction, "comment"))
-        {
-            return $"Invite the audience to comment '{callToActionKeyword}'.";
-        }
-
-        if (ContainsAny(profile.DesiredAction, "dm", "message"))
-        {
-            return $"Invite the audience to DM '{callToActionKeyword}'.";
-        }
-
-        if (RequiresBookingCallToAction(profile))
-        {
-            return $"Invite the audience to book a consultation and mention '{callToActionKeyword}' when they reach out.";
-        }
-
-        return $"Invite the audience to {profile.DesiredAction.ToLowerInvariant()} and use '{callToActionKeyword}' as the conversion keyword.";
-    }
-
-    private static string BuildDesiredActionPrompt(ClientProfile profile, string callToActionKeyword)
-    {
-        if (RequiresBookingCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.CalendlyUrl))
-        {
-            return $"Book through {profile.CalendlyUrl} or DM '{callToActionKeyword}' if you want the right next step.";
-        }
-
-        if (RequiresWebsiteCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.WebsiteUrl))
-        {
-            return $"Visit {profile.WebsiteUrl} and use '{callToActionKeyword}' if you want help choosing the right option.";
-        }
-
-        if (ContainsAny(profile.DesiredAction, "comment"))
-        {
-            return $"Comment '{callToActionKeyword}' to keep the conversation going.";
-        }
-
-        if (ContainsAny(profile.DesiredAction, "dm", "message"))
-        {
-            return $"DM '{callToActionKeyword}' to keep the conversation going.";
-        }
-
-        if (RequiresBookingCallToAction(profile))
-        {
-            return $"Book a consultation or message '{callToActionKeyword}' if you want support.";
-        }
-
-        return $"{profile.DesiredAction.TrimEnd('.')} and use '{callToActionKeyword}' to keep the conversation moving.";
+        return new ContentMemoryEntry(
+            _idGenerator.NewId("content_memory"),
+            tenant.TenantId,
+            nameof(PrimaryAsset),
+            primaryAsset.PrimaryAssetId,
+            canonicalFrame.Topic,
+            canonicalFrame.PrimaryHook,
+            canonicalFrame.CallToAction,
+            backlogItem.LeadGoal,
+            tenant.Profile.Platforms.FirstOrDefault() ?? "Instagram",
+            contentHash,
+            _clock.UtcNow,
+            ContentMemoryLifecycleStage.Generated,
+            SourceBacklogItemId: $"{request.EditorialBacklogId}:{backlogItem.Sequence}",
+            SourceStrategyPlanId: request.EditorialBacklogId);
     }
 
     private static string BuildRepurposeCallToAction(ClientProfile profile, string callToActionKeyword) =>
@@ -318,11 +279,6 @@ public sealed class GenerateDailyContentPackageUseCase
             : RequiresWebsiteCallToAction(profile) && !string.IsNullOrWhiteSpace(profile.WebsiteUrl)
                 ? $"Visit {profile.WebsiteUrl}"
             : callToActionKeyword;
-
-    private static string BuildEngagementPrompt(ClientProfile profile, DailyContentBrief brief) =>
-        RequiresBookingCallToAction(profile)
-            ? $"Ask the audience what result they want before they book around {brief.Topic.ToLowerInvariant()}."
-            : $"Ask the audience what part of {brief.Topic.ToLowerInvariant()} is slowing them down most.";
 
     private static string BuildFollowUpQuestion(ClientProfile profile, string callToActionKeyword)
     {

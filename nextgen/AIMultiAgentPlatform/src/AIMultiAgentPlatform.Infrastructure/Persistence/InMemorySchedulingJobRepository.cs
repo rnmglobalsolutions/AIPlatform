@@ -14,6 +14,9 @@ public sealed class InMemorySchedulingJobRepository : ISchedulingJobRepository
         return Task.CompletedTask;
     }
 
+    public Task<SchedulingJob?> FindByIdAsync(string schedulingJobId, CancellationToken cancellationToken) =>
+        Task.FromResult(Find(schedulingJobId));
+
     public Task<SchedulingJob?> FindByRequestIdAsync(string requestId, CancellationToken cancellationToken) =>
         Task.FromResult(_items.Values.FirstOrDefault(item => item.DailyContentRequestId == requestId));
 

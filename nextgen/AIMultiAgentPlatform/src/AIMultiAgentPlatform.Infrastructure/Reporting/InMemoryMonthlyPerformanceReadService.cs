@@ -10,6 +10,7 @@ public sealed class InMemoryMonthlyPerformanceReadService : IMonthlyPerformanceR
     private readonly Persistence.InMemoryQualityReviewRepository _qualityReviewRepository;
     private readonly Persistence.InMemoryApprovalRequestRepository _approvalRequestRepository;
     private readonly Persistence.InMemorySchedulingJobRepository _schedulingJobRepository;
+    private readonly Persistence.InMemoryPublishedContentRecordRepository _publishedContentRecordRepository;
     private readonly Persistence.InMemoryLeadProfileRepository _leadProfileRepository;
     private readonly Persistence.InMemoryBookingRecordRepository _bookingRecordRepository;
     private readonly Persistence.InMemoryReminderScheduleRepository _reminderScheduleRepository;
@@ -21,6 +22,7 @@ public sealed class InMemoryMonthlyPerformanceReadService : IMonthlyPerformanceR
         Persistence.InMemoryQualityReviewRepository qualityReviewRepository,
         Persistence.InMemoryApprovalRequestRepository approvalRequestRepository,
         Persistence.InMemorySchedulingJobRepository schedulingJobRepository,
+        Persistence.InMemoryPublishedContentRecordRepository publishedContentRecordRepository,
         Persistence.InMemoryLeadProfileRepository leadProfileRepository,
         Persistence.InMemoryBookingRecordRepository bookingRecordRepository,
         Persistence.InMemoryReminderScheduleRepository reminderScheduleRepository,
@@ -31,6 +33,7 @@ public sealed class InMemoryMonthlyPerformanceReadService : IMonthlyPerformanceR
         _qualityReviewRepository = qualityReviewRepository;
         _approvalRequestRepository = approvalRequestRepository;
         _schedulingJobRepository = schedulingJobRepository;
+        _publishedContentRecordRepository = publishedContentRecordRepository;
         _leadProfileRepository = leadProfileRepository;
         _bookingRecordRepository = bookingRecordRepository;
         _reminderScheduleRepository = reminderScheduleRepository;
@@ -72,6 +75,7 @@ public sealed class InMemoryMonthlyPerformanceReadService : IMonthlyPerformanceR
                 _qualityReviewRepository.ListAll().Where(item => requestIds.Contains(item.DailyContentRequestId)).ToArray(),
                 _approvalRequestRepository.ListAll().Where(item => requestIds.Contains(item.DailyContentRequestId)).ToArray(),
                 _schedulingJobRepository.ListAll().Where(item => requestIds.Contains(item.DailyContentRequestId)).ToArray(),
+                _publishedContentRecordRepository.ListAll().Where(item => requestIds.Contains(item.DailyContentRequestId)).ToArray(),
                 leadProfiles,
                 bookingRecords,
                 reminderSchedules,

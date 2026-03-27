@@ -50,4 +50,16 @@ internal abstract class TableStorageJsonRepositoryBase
         var document = JsonSerializer.Deserialize<TDocument>(payloadJson, SerializerOptions);
         return document;
     }
+
+    protected async Task DeleteDocumentAsync(string rowKey, CancellationToken cancellationToken)
+    {
+        await _tableClient.CreateIfNotExistsAsync(cancellationToken);
+        try
+        {
+            await _tableClient.DeleteEntityAsync(PartitionKey, rowKey, ETag.All, cancellationToken);
+        }
+        catch (RequestFailedException exception) when (exception.Status == 404)
+        {
+        }
+    }
 }

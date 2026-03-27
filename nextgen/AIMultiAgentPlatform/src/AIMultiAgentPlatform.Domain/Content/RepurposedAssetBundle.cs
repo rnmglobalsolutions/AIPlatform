@@ -8,4 +8,5 @@ public sealed record RepurposedAssetBundle(
     string LinkedInPost,
     string QuotePost,
     string ShortClipIdea,
-    IReadOnlyList<string> CommentHooks);
+    IReadOnlyList<string> CommentHooks,
+    IReadOnlyList<VideoClipExtractionPlan>? ClipPlans = null);

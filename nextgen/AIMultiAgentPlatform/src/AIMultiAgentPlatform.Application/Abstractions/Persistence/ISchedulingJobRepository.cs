@@ -6,5 +6,7 @@ public interface ISchedulingJobRepository
 {
     Task SaveAsync(SchedulingJob job, CancellationToken cancellationToken);
 
+    Task<SchedulingJob?> FindByIdAsync(string schedulingJobId, CancellationToken cancellationToken);
+
     Task<SchedulingJob?> FindByRequestIdAsync(string requestId, CancellationToken cancellationToken);
 }

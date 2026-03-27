@@ -20,7 +20,8 @@ public sealed class TenantTests
             ["Instagram", "Instagram", "LinkedIn"],
             ["Low visibility"],
             ["Too expensive"],
-            []);
+            [],
+            ContentPlanTier: "growth");
 
         var tenant = Tenant.Create(new TenantId("tenant_123"), "RNM-LABS", profile, new DateTime(2026, 03, 23, 12, 0, 0, DateTimeKind.Utc));
 
@@ -28,6 +29,7 @@ public sealed class TenantTests
         Assert.Equal("RNM Labs", tenant.DisplayName);
         Assert.Equal("jane@example.com", tenant.Profile.PrimaryContactEmail);
         Assert.Equal(2, tenant.Profile.Platforms.Count);
+        Assert.Equal("Growth", tenant.Profile.ContentPlanTier);
     }
 
     [Fact]
@@ -48,5 +50,28 @@ public sealed class TenantTests
             []);
 
         Assert.Throws<ArgumentException>(() => Tenant.Create(new TenantId("tenant_123"), " ", profile, DateTime.UtcNow));
+    }
+
+    [Fact]
+    public void Create_DefaultsUnknownContentPlanTierToStarter()
+    {
+        var profile = new ClientProfile(
+            "RNM",
+            "Jane",
+            "jane@example.com",
+            "Coaches",
+            "Growth",
+            "Founders",
+            "Bold",
+            "BOOK",
+            ["Instagram"],
+            ["Low visibility"],
+            ["Too expensive"],
+            [],
+            ContentPlanTier: "Enterprise");
+
+        var tenant = Tenant.Create(new TenantId("tenant_123"), "rnm", profile, DateTime.UtcNow);
+
+        Assert.Equal("Starter", tenant.Profile.ContentPlanTier);
     }
 }

@@ -58,9 +58,11 @@ public sealed class GenerateMonthlyPerformanceSnapshotUseCase
 
         var videosCreated = source.PrimaryAssets.Count(asset => asset.PrimaryFormat == PrimaryFormat.ShortVideo);
         var graphicsCreated = source.PrimaryAssets.Count(asset => asset.PrimaryFormat == PrimaryFormat.BrandedGraphic);
-        var postsPublished = source.SchedulingJobs
-            .Where(job => job.Status == Domain.Publishing.SchedulingStatus.Scheduled)
-            .Sum(job => job.Targets.Count);
+        var postsPublished = source.PublishedContentRecords.Count > 0
+            ? source.PublishedContentRecords.Count(record => record.Status == Domain.Publishing.PublishedContentStatus.Published)
+            : source.SchedulingJobs
+                .Where(job => job.Status == Domain.Publishing.SchedulingStatus.Published)
+                .Sum(job => job.Targets.Count);
 
         var approvedContentPackages = source.ApprovalRequests.Count(item => item.Status == ApprovalStatus.Approved);
         var blockedContentPackages = source.ApprovalRequests.Count(item => item.Status == ApprovalStatus.NeedsChanges);

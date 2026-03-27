@@ -14,6 +14,7 @@ public sealed record MonthlyPerformanceSource(
     IReadOnlyList<QualityReview> QualityReviews,
     IReadOnlyList<ApprovalRequest> ApprovalRequests,
     IReadOnlyList<SchedulingJob> SchedulingJobs,
+    IReadOnlyList<PublishedContentRecord> PublishedContentRecords,
     IReadOnlyList<LeadProfile> LeadProfiles,
     IReadOnlyList<BookingRecord> BookingRecords,
     IReadOnlyList<ReminderSchedule> ReminderSchedules,

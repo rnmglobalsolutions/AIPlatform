@@ -31,4 +31,5 @@ public sealed record TallySubmissionRequest(
     string WebsiteUrl = "",
     string PainPointsText = "",
     string ObjectionsText = "",
-    string AvoidTopicsText = "");
+    string AvoidTopicsText = "",
+    string ContentPlanTier = "");

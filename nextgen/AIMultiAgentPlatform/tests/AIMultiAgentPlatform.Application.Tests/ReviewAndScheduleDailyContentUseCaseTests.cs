@@ -48,6 +48,9 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
         Assert.Equal(2, result.Value.ScheduledTargetCount);
         Assert.NotNull(complianceRepository.Saved);
         Assert.True(qualityRepository.Saved!.OverallScore >= 7.5);
+        Assert.True(qualityRepository.Saved.SpecificityScore >= 7.5);
+        Assert.True(qualityRepository.Saved.PlatformFitScore >= 7.5);
+        Assert.True((qualityRepository.Saved.EvaluationWarnings ?? []).Count <= 2);
         Assert.Equal(ApprovalStatus.Approved, approvalRepository.Saved!.Status);
         Assert.Equal(SchedulingStatus.Scheduled, schedulingRepository.Saved!.Status);
     }
@@ -128,6 +131,65 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
             Assert.Contains("Book via https://calendly.com/rnm-growth/consultation", target.PayloadSummary, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Language: Bilingual", target.PayloadSummary, StringComparison.OrdinalIgnoreCase);
         });
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_BlocksLowQualityRepetitiveContent()
+    {
+        var tenant = CreateTenant(["Instagram"], ["Politics"]);
+        var request = new DailyContentRequest("daily_request_099", tenant.TenantId, "backlog_001", 5, DateTime.UtcNow, "corr-999");
+        var brief = new DailyContentBrief("brief_099", request.DailyContentRequestId, tenant.TenantId, ContentCategory.Authority, PrimaryFormat.ShortVideo, "Authority topic", "Generic angle", "Game changer", "Generic message", "BOOK", "Bold");
+        var primaryAsset = new PrimaryAsset(
+            "primary_asset_099",
+            request.DailyContentRequestId,
+            tenant.TenantId,
+            PrimaryFormat.ShortVideo,
+            "Game changer",
+            "Game changer",
+            new string('x', 950),
+            "Generic payoff",
+            "Do something",
+            "Notes");
+        var caption = new CaptionAsset(
+            "caption_099",
+            request.DailyContentRequestId,
+            new string('y', 700),
+            "Prompt",
+            "BOOK",
+            ["#Test"]);
+        var bundle = new RepurposedAssetBundle(
+            "repurpose_099",
+            request.DailyContentRequestId,
+            "Carousel",
+            ["Same frame", "Same frame"],
+            "LinkedIn",
+            "Quote",
+            "Clip",
+            ["Same hook", "Same hook"]);
+
+        var useCase = CreateUseCase(
+            tenant,
+            request,
+            brief,
+            primaryAsset,
+            caption,
+            bundle,
+            out _,
+            out var qualityRepository,
+            out var approvalRepository,
+            out var schedulingRepository);
+
+        var result = await useCase.ExecuteAsync(
+            new ReviewAndScheduleDailyContentCommand(
+                new ReviewAndScheduleDailyContentRequest(tenant.TenantId.Value, request.DailyContentRequestId)),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(qualityRepository.Saved!.OverallScore < 7.5);
+        Assert.True(qualityRepository.Saved.AntiRepetitionScore < 7.5);
+        Assert.Contains(qualityRepository.Saved.EvaluationWarnings ?? [], warning => warning.Contains("repetitive", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(ApprovalStatus.NeedsChanges, approvalRepository.Saved!.Status);
+        Assert.Equal(SchedulingStatus.Blocked, schedulingRepository.Saved!.Status);
     }
 
     private static ReviewAndScheduleDailyContentUseCase CreateUseCase(
@@ -301,6 +363,9 @@ public sealed class ReviewAndScheduleDailyContentUseCaseTests
             Saved = job;
             return Task.CompletedTask;
         }
+
+        public Task<SchedulingJob?> FindByIdAsync(string schedulingJobId, CancellationToken cancellationToken) =>
+            Task.FromResult(Saved?.SchedulingJobId == schedulingJobId ? Saved : null);
 
         public Task<SchedulingJob?> FindByRequestIdAsync(string requestId, CancellationToken cancellationToken) =>
             Task.FromResult(Saved?.DailyContentRequestId == requestId ? Saved : null);
