@@ -76,6 +76,24 @@ param serviceBusQueues array = [
   'report-jobs'
 ]
 
+@description('Enable Azure Monitor metric alerts for queue backlog, dead-letter growth, API 5xx and API latency.')
+param enableOperationalAlerts bool = false
+
+@description('Email recipients that should receive operational alerts when alerting is enabled.')
+param alertEmailReceivers array = []
+
+@description('Threshold for Service Bus active messages before triggering a backlog alert.')
+param serviceBusActiveMessagesAlertThreshold int = 250
+
+@description('Threshold for dead-letter messages before triggering an alert.')
+param serviceBusDeadLetterMessagesAlertThreshold int = 1
+
+@description('Threshold for API HTTP 5xx responses per evaluation window before triggering an alert.')
+param apiHttp5xxAlertThreshold int = 5
+
+@description('Threshold for average API response time in seconds before triggering a latency alert.')
+param apiAverageResponseTimeAlertThresholdSeconds int = 3
+
 module resourceGroupModule './modules/resource-group.bicep' = {
   name: 'resource-group-${appName}-${environmentName}'
   scope: subscription()
@@ -110,6 +128,12 @@ module environmentModule './modules/environment.bicep' = {
     storageSku: storageSku
     blobContainers: blobContainers
     serviceBusQueues: serviceBusQueues
+    enableOperationalAlerts: enableOperationalAlerts
+    alertEmailReceivers: alertEmailReceivers
+    serviceBusActiveMessagesAlertThreshold: serviceBusActiveMessagesAlertThreshold
+    serviceBusDeadLetterMessagesAlertThreshold: serviceBusDeadLetterMessagesAlertThreshold
+    apiHttp5xxAlertThreshold: apiHttp5xxAlertThreshold
+    apiAverageResponseTimeAlertThresholdSeconds: apiAverageResponseTimeAlertThresholdSeconds
   }
   dependsOn: [
     resourceGroupModule
@@ -121,6 +145,8 @@ output apiAppName string = environmentModule.outputs.apiAppName
 output workerFunctionAppName string = environmentModule.outputs.workerFunctionAppName
 output keyVaultName string = environmentModule.outputs.keyVaultName
 output storageAccountName string = environmentModule.outputs.storageAccountName
+output applicationInsightsResourceId string = environmentModule.outputs.applicationInsightsResourceId
+output logAnalyticsWorkspaceId string = environmentModule.outputs.logAnalyticsWorkspaceId
 output sqlServerName string = environmentModule.outputs.sqlServerName
 output sqlDatabaseName string = environmentModule.outputs.sqlDatabaseName
 output serviceBusNamespaceName string = environmentModule.outputs.serviceBusNamespaceName

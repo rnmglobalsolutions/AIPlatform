@@ -22,3 +22,7 @@ param serviceBusSku = 'Standard'
 param sqlDatabaseSkuName = 'S1'
 param sqlDatabaseMaxSizeBytes = 268435456000
 param storageSku = 'Standard_GRS'
+param enableOperationalAlerts = true
+param alertEmailReceivers = [
+  'alerts-platform@rnmglobalsolutions.com'
+]

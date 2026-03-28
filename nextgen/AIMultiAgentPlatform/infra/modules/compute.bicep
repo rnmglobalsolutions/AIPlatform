@@ -17,6 +17,9 @@ param targetMessagingMode string
 param targetHostingMode string
 param sqlConnectionStringPlaceholder string
 param serviceBusFullyQualifiedNamespace string
+param actionGroupResourceId string = ''
+param apiHttp5xxAlertThreshold int = 5
+param apiAverageResponseTimeAlertThresholdSeconds int = 3
 param tags object = {}
 
 var isLean = toLower(platformMode) == 'lean'
@@ -191,6 +194,82 @@ resource apiWebApp 'Microsoft.Web/sites@2023-12-01' = if (!isLean) {
         }
       ]
     }
+  }
+}
+
+resource apiHttp5xxAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (!isLean && !empty(actionGroupResourceId)) {
+  name: 'alert-${apiAppName}-http5xx'
+  location: 'global'
+  tags: tags
+  properties: {
+    description: 'Alerts when the API starts returning HTTP 5xx responses.'
+    severity: 2
+    enabled: true
+    scopes: [
+      apiWebApp.id
+    ]
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT5M'
+    targetResourceType: 'Microsoft.Web/sites'
+    targetResourceRegion: location
+    autoMitigate: true
+    criteria: {
+      'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
+      allOf: [
+        {
+          criterionType: 'StaticThresholdCriterion'
+          name: 'Http5xxThreshold'
+          metricNamespace: 'Microsoft.Web/sites'
+          metricName: 'Http5xx'
+          operator: 'GreaterThan'
+          threshold: apiHttp5xxAlertThreshold
+          timeAggregation: 'Total'
+        }
+      ]
+    }
+    actions: [
+      {
+        actionGroupId: actionGroupResourceId
+      }
+    ]
+  }
+}
+
+resource apiLatencyAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (!isLean && !empty(actionGroupResourceId)) {
+  name: 'alert-${apiAppName}-latency'
+  location: 'global'
+  tags: tags
+  properties: {
+    description: 'Alerts when average API response time rises above the configured threshold.'
+    severity: 3
+    enabled: true
+    scopes: [
+      apiWebApp.id
+    ]
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT5M'
+    targetResourceType: 'Microsoft.Web/sites'
+    targetResourceRegion: location
+    autoMitigate: true
+    criteria: {
+      'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
+      allOf: [
+        {
+          criterionType: 'StaticThresholdCriterion'
+          name: 'AverageResponseTimeThreshold'
+          metricNamespace: 'Microsoft.Web/sites'
+          metricName: 'AverageResponseTime'
+          operator: 'GreaterThan'
+          threshold: apiAverageResponseTimeAlertThresholdSeconds
+          timeAggregation: 'Average'
+        }
+      ]
+    }
+    actions: [
+      {
+        actionGroupId: actionGroupResourceId
+      }
+    ]
   }
 }
 

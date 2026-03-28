@@ -1,3 +1,25 @@
 {
-  "version": "2.0"
+  "version": "2.0",
+  "logging": {
+    "logLevel": {
+      "default": "Warning",
+      "Function.ProcessTallySubmissionCommandWorker": "Information",
+      "Function.GenerateDailyContentPackageCommandWorker": "Information",
+      "Function.ReviewAndScheduleDailyContentCommandWorker": "Information",
+      "Function.PublishScheduledContentCommandWorker": "Information",
+      "Function.OutboxDispatch": "Information",
+      "Function.VideoGenerationPolling": "Information",
+      "Host.Results": "Warning",
+      "Host.Aggregator": "Warning",
+      "Microsoft": "Warning",
+      "Worker": "Warning"
+    },
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "maxTelemetryItemsPerSecond": 10,
+        "excludedTypes": "Exception"
+      }
+    }
+  }
 }

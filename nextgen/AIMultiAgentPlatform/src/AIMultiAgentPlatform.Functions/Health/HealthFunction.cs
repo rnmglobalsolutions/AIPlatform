@@ -3,13 +3,13 @@ using AIMultiAgentPlatform.Infrastructure.Observability;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 
-namespace AIMultiAgentPlatform.Workers;
+namespace AIMultiAgentPlatform.Functions.Health;
 
 public sealed class HealthFunction(PlatformOperationalReadinessService readinessService)
 {
-    [Function("WorkerHealthReady")]
+    [Function("FunctionsHealthReady")]
     public async Task<HttpResponseData> ReadyAsync(
-        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "api/internal/worker-health/ready")] HttpRequestData request)
+        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "api/internal/health/ready")] HttpRequestData request)
     {
         var report = readinessService.GetReport();
         var response = request.CreateResponse(report.IsReady ? HttpStatusCode.OK : HttpStatusCode.ServiceUnavailable);
@@ -17,9 +17,9 @@ public sealed class HealthFunction(PlatformOperationalReadinessService readiness
         return response;
     }
 
-    [Function("WorkerHealthLive")]
+    [Function("FunctionsHealthLive")]
     public async Task<HttpResponseData> LiveAsync(
-        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "api/internal/worker-health/live")] HttpRequestData request)
+        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "api/internal/health/live")] HttpRequestData request)
     {
         var response = request.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new

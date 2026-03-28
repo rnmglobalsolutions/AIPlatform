@@ -20,6 +20,7 @@ using AIMultiAgentPlatform.Infrastructure.Security;
 using AIMultiAgentPlatform.Infrastructure.Storage;
 using AIMultiAgentPlatform.Infrastructure.Messaging.InMemory;
 using AIMultiAgentPlatform.Infrastructure.Messaging.ServiceBus;
+using AIMultiAgentPlatform.Infrastructure.Observability;
 using AIMultiAgentPlatform.Infrastructure.Video;
 using AIMultiAgentPlatform.Infrastructure.Video.HeyGen;
 using AIMultiAgentPlatform.Infrastructure.Video.InMemory;
@@ -101,6 +102,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton(serviceBusOptions);
         services.AddSingleton(outboxOptions);
         services.AddSingleton(featureFlags);
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<PlatformOperationalReadinessService>();
         services.AddSingleton<HeuristicReportAgent>();
         services.AddSingleton<IReportAgent>(sp => sp.GetRequiredService<HeuristicReportAgent>());
         services.AddSingleton<IPublicWebhookUrlResolver, ConfigurationPublicWebhookUrlResolver>();

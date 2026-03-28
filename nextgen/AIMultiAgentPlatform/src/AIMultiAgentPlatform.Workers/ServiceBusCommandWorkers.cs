@@ -171,8 +171,17 @@ public sealed class ServiceBusCommandWorkers(
 
         try
         {
-            await handler(serviceProvider, command, cancellationToken);
-            await inboxRepository.MarkProcessedAsync(message.MessageId, consumerName, clock.UtcNow, cancellationToken);
+            using (logger.BeginScope(new Dictionary<string, object>
+                   {
+                       ["CorrelationId"] = message.CorrelationId ?? string.Empty,
+                       ["MessageId"] = message.MessageId,
+                       ["ConsumerName"] = consumerName,
+                       ["TenantId"] = tenantId
+                   }))
+            {
+                await handler(serviceProvider, command, cancellationToken);
+                await inboxRepository.MarkProcessedAsync(message.MessageId, consumerName, clock.UtcNow, cancellationToken);
+            }
         }
         catch
         {

@@ -13,6 +13,12 @@ param sqlDatabaseMaxSizeBytes int
 param storageSku string
 param blobContainers array
 param serviceBusQueues array
+param enableOperationalAlerts bool = false
+param alertEmailReceivers array = []
+param serviceBusActiveMessagesAlertThreshold int = 250
+param serviceBusDeadLetterMessagesAlertThreshold int = 1
+param apiHttp5xxAlertThreshold int = 5
+param apiAverageResponseTimeAlertThresholdSeconds int = 3
 
 var isProduction = deploymentMode == 'production'
 var compactSuffix = toLower(uniqueString(subscription().subscriptionId, resourceGroup().name, environmentName))
@@ -41,6 +47,8 @@ module monitoringModule './monitoring.bicep' = {
     location: location
     logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
     applicationInsightsName: appInsightsName
+    enableOperationalAlerts: enableOperationalAlerts
+    alertEmailReceivers: alertEmailReceivers
     tags: tags
   }
 }
@@ -96,6 +104,9 @@ module serviceBusModule './service-bus.bicep' = if (isProduction) {
     serviceBusNamespaceName: serviceBusNamespaceName
     serviceBusSku: serviceBusSku
     queueNames: serviceBusQueues
+    actionGroupResourceId: monitoringModule.outputs.actionGroupResourceId
+    activeMessagesAlertThreshold: serviceBusActiveMessagesAlertThreshold
+    deadLetterMessagesAlertThreshold: serviceBusDeadLetterMessagesAlertThreshold
     tags: tags
   }
 }
@@ -122,6 +133,9 @@ module computeModule './compute.bicep' = {
     targetHostingMode: isProduction ? 'Dedicated' : 'FunctionsConsumption'
     sqlConnectionStringPlaceholder: sqlConnectionStringPlaceholder
     serviceBusFullyQualifiedNamespace: serviceBusFullyQualifiedNamespace
+    actionGroupResourceId: monitoringModule.outputs.actionGroupResourceId
+    apiHttp5xxAlertThreshold: apiHttp5xxAlertThreshold
+    apiAverageResponseTimeAlertThresholdSeconds: apiAverageResponseTimeAlertThresholdSeconds
     tags: tags
   }
 }
@@ -130,6 +144,8 @@ output apiAppName string = isProduction ? apiAppName : ''
 output workerFunctionAppName string = workerFunctionAppName
 output keyVaultName string = keyVaultName
 output storageAccountName string = storageAccountName
+output applicationInsightsResourceId string = monitoringModule.outputs.applicationInsightsResourceId
+output logAnalyticsWorkspaceId string = monitoringModule.outputs.logAnalyticsWorkspaceId
 output sqlServerName string = isProduction ? sqlServerName : ''
 output sqlDatabaseName string = isProduction ? sqlDatabaseName : ''
 output serviceBusNamespaceName string = isProduction ? serviceBusNamespaceName : ''

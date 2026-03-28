@@ -79,6 +79,17 @@ az deployment sub create \
   --parameters infra/main.subscription.prod.bicepparam
 ```
 
+You can also override operational alerting at deploy time without editing the base template:
+
+```bash
+az deployment sub create \
+  --location eastus2 \
+  --template-file infra/main.subscription.bicep \
+  --parameters infra/main.subscription.prod.bicepparam \
+  --parameters enableOperationalAlerts=true \
+  --parameters alertEmailReceivers=\"['alerts-platform@rnmglobalsolutions.com']\"
+```
+
 ## GitHub Actions
 
 Repository workflows live at the repo root:
